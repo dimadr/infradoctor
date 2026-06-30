@@ -6,6 +6,7 @@ type Registry struct {
 
 func NewRegistry() *Registry {
 	r := &Registry{}
+	r.Register(&SSHModule{})
 	return r
 }
 

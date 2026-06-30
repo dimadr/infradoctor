@@ -10,17 +10,22 @@ type OSInfo struct {
 	Kernel     string `json:"kernel"`
 }
 
-// Result is the output of a diagnostic run.
 type Result struct {
-	ID      string  `json:"id"`
-	Name    string  `json:"name"`
-	Status  string  `json:"status"` // ok, warning, critical, unknown
-	Summary string  `json:"summary,omitempty"`
-	Checks  []Check `json:"checks,omitempty"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Status          string   `json:"status"`
+	Summary         string   `json:"summary,omitempty"`
+	Sections        []Section `json:"sections,omitempty"`
+	Recommendations []string `json:"recommendations,omitempty"`
 }
 
-// Check is a single diagnostic finding.
+type Section struct {
+	Name   string  `json:"name"`
+	Status string  `json:"status"`
+	Checks []Check `json:"checks,omitempty"`
+}
+
 type Check struct {
-	Status  string `json:"status"` // ok, warning, critical, info
+	Status  string `json:"status"`
 	Message string `json:"message"`
 }

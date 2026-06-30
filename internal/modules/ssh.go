@@ -1,0 +1,345 @@
+package modules
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/dimadr/infradoctor/internal/model"
+)
+
+type SSHModule struct{}
+
+func (m *SSHModule) ID() string      { return "ssh" }
+func (m *SSHModule) Name() string    { return "SSH Module" }
+func (m *SSHModule) Detect() bool {
+	_, err := exec.LookPath("sshd")
+	return err == nil
+}
+
+func (m *SSHModule) Diagnose(ctx context.Context) model.Result {
+	var sections []model.Section
+	var recommendations []string
+
+	sections = append(sections, diagnoseSSHService(ctx))
+	sections = append(sections, diagnoseSSHConfig(ctx))
+	sections = append(sections, diagnoseSSHAuth(ctx))
+	sections = append(sections, diagnoseSSHPermissions())
+	sections = append(sections, diagnoseSSHSecurity(ctx))
+
+	for _, s := range sections {
+		for _, c := range s.Checks {
+			if c.Status == "warning" || c.Status == "critical" {
+				recommendations = append(recommendations, c.Message)
+			}
+		}
+	}
+
+	status := "ok"
+	for _, s := range sections {
+		switch s.Status {
+		case "critical":
+			status = "critical"
+		case "warning":
+			if status != "critical" {
+				status = "warning"
+			}
+		}
+	}
+
+	return model.Result{
+		ID:              m.ID(),
+		Name:            m.Name(),
+		Status:          status,
+		Sections:        sections,
+		Recommendations: recommendations,
+	}
+}
+
+func runCmd(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func diagnoseSSHService(ctx context.Context) model.Section {
+	var checks []model.Check
+
+	out, _ := runCmd(ctx, "systemctl", "is-active", "sshd")
+	if out == "" {
+		out = "unknown"
+	}
+	checks = append(checks, model.Check{
+		Status:  checkStatus(out == "active"),
+		Message: fmt.Sprintf("sshd service is %s", out),
+	})
+
+	out, _ = runCmd(ctx, "systemctl", "is-enabled", "sshd")
+	if out == "" {
+		out = "unknown"
+	}
+	checks = append(checks, model.Check{
+		Status:  checkStatus(out == "enabled"),
+		Message: fmt.Sprintf("sshd is %s on boot", out),
+	})
+
+	return model.Section{
+		Name:   "Service Status",
+		Status: sectionStatus(checks),
+		Checks: checks,
+	}
+}
+
+func diagnoseSSHConfig(ctx context.Context) model.Section {
+	var checks []model.Check
+
+	out, err := runCmd(ctx, "sshd", "-t")
+	if err != nil {
+		checks = append(checks, model.Check{
+			Status:  "critical",
+			Message: fmt.Sprintf("sshd -t: syntax error (%v)", err),
+		})
+	} else {
+		checks = append(checks, model.Check{
+			Status:  "ok",
+			Message: "sshd -t: config syntax OK",
+		})
+	}
+	_ = out
+
+	if _, err := os.Stat("/etc/ssh/sshd_config"); err == nil {
+		checks = append(checks, model.Check{
+			Status:  "ok",
+			Message: "/etc/ssh/sshd_config exists",
+		})
+	} else {
+		checks = append(checks, model.Check{
+			Status:  "critical",
+			Message: "/etc/ssh/sshd_config not found",
+		})
+	}
+
+	return model.Section{
+		Name:   "Configuration",
+		Status: sectionStatus(checks),
+		Checks: checks,
+	}
+}
+
+func diagnoseSSHAuth(ctx context.Context) model.Section {
+	config, err := readSSHConfig("/etc/ssh/sshd_config")
+	if err != nil {
+		return model.Section{
+			Name:   "Authentication",
+			Status: "unknown",
+			Checks: []model.Check{{Status: "unknown", Message: fmt.Sprintf("cannot read sshd_config: %v", err)}},
+		}
+	}
+
+	var checks []model.Check
+
+	val := config["PermitRootLogin"]
+	switch val {
+	case "yes":
+		checks = append(checks, model.Check{Status: "warning", Message: "PermitRootLogin: yes (consider 'prohibit-password' or 'no')"})
+	case "prohibit-password", "without-password":
+		checks = append(checks, model.Check{Status: "ok", Message: "PermitRootLogin: " + val})
+	case "no":
+		checks = append(checks, model.Check{Status: "ok", Message: "PermitRootLogin: no"})
+	default:
+		checks = append(checks, model.Check{Status: "info", Message: "PermitRootLogin: " + val})
+	}
+
+	val = config["PasswordAuthentication"]
+	switch val {
+	case "yes":
+		checks = append(checks, model.Check{Status: "warning", Message: "PasswordAuthentication: yes (consider key-based auth)"})
+	case "no":
+		checks = append(checks, model.Check{Status: "ok", Message: "PasswordAuthentication: no"})
+	default:
+		checks = append(checks, model.Check{Status: "info", Message: "PasswordAuthentication: " + val})
+	}
+
+	val = config["PubkeyAuthentication"]
+	switch val {
+	case "yes":
+		checks = append(checks, model.Check{Status: "ok", Message: "PubkeyAuthentication: yes"})
+	case "no":
+		checks = append(checks, model.Check{Status: "warning", Message: "PubkeyAuthentication: no (public key auth disabled)"})
+	default:
+		checks = append(checks, model.Check{Status: "info", Message: "PubkeyAuthentication: " + val})
+	}
+
+	val = config["KbdInteractiveAuthentication"]
+	if val == "yes" {
+		checks = append(checks, model.Check{Status: "info", Message: "KbdInteractiveAuthentication: yes"})
+	}
+
+	val = config["ChallengeResponseAuthentication"]
+	if val == "yes" {
+		checks = append(checks, model.Check{Status: "info", Message: "ChallengeResponseAuthentication: yes"})
+	}
+
+	return model.Section{
+		Name:   "Authentication",
+		Status: sectionStatus(checks),
+		Checks: checks,
+	}
+}
+
+func diagnoseSSHPermissions() model.Section {
+	var checks []model.Check
+
+	sshDir := filepath.Join(homeDir(), ".ssh")
+	info, err := os.Stat(sshDir)
+	if err != nil {
+		checks = append(checks, model.Check{Status: "warning", Message: fmt.Sprintf("%s: %v", sshDir, err)})
+		return model.Section{Name: "Permissions", Status: "warning", Checks: checks}
+	}
+	perm := info.Mode().Perm()
+	if perm&0077 != 0 {
+		checks = append(checks, model.Check{Status: "warning", Message: fmt.Sprintf("%s: permissions %04o (should be 0700)", sshDir, perm)})
+	} else {
+		checks = append(checks, model.Check{Status: "ok", Message: fmt.Sprintf("%s: permissions %04o", sshDir, perm)})
+	}
+
+	authKeys := filepath.Join(sshDir, "authorized_keys")
+	info, err = os.Stat(authKeys)
+	if err == nil {
+		perm = info.Mode().Perm()
+		if perm&0077 != 0 || perm&0044 != 0 {
+			checks = append(checks, model.Check{Status: "warning", Message: fmt.Sprintf("%s: permissions %04o (should be 0600)", authKeys, perm)})
+		} else {
+			checks = append(checks, model.Check{Status: "ok", Message: fmt.Sprintf("%s: permissions %04o", authKeys, perm)})
+		}
+	}
+
+	return model.Section{
+		Name:   "Permissions",
+		Status: sectionStatus(checks),
+		Checks: checks,
+	}
+}
+
+func diagnoseSSHSecurity(ctx context.Context) model.Section {
+	config, err := readSSHConfig("/etc/ssh/sshd_config")
+	if err != nil {
+		return model.Section{
+			Name:   "Security",
+			Status: "unknown",
+			Checks: []model.Check{{Status: "unknown", Message: fmt.Sprintf("cannot read sshd_config: %v", err)}},
+		}
+	}
+
+	var checks []model.Check
+
+	if v := config["Protocol"]; v != "" {
+		if v == "1" {
+			checks = append(checks, model.Check{Status: "critical", Message: "Protocol: 1 (insecure, use Protocol 2)"})
+		} else {
+			checks = append(checks, model.Check{Status: "ok", Message: "Protocol: " + v})
+		}
+	}
+
+	if v := config["LogLevel"]; v != "" {
+		if v == "INFO" || v == "VERBOSE" {
+			checks = append(checks, model.Check{Status: "ok", Message: "LogLevel: " + v})
+		} else {
+			checks = append(checks, model.Check{Status: "info", Message: "LogLevel: " + v})
+		}
+	}
+
+	if v := config["MaxAuthTries"]; v != "" {
+		if v <= "3" {
+			checks = append(checks, model.Check{Status: "ok", Message: "MaxAuthTries: " + v})
+		} else {
+			checks = append(checks, model.Check{Status: "warning", Message: "MaxAuthTries: " + v + " (consider ≤ 3)"})
+		}
+	}
+
+	if v := config["ClientAliveInterval"]; v != "" && v != "0" {
+		checks = append(checks, model.Check{Status: "ok", Message: "ClientAliveInterval: " + v})
+	}
+
+	if v := config["UsePAM"]; v == "yes" {
+		checks = append(checks, model.Check{Status: "ok", Message: "UsePAM: yes"})
+	}
+
+	if v := config["X11Forwarding"]; v == "yes" {
+		checks = append(checks, model.Check{Status: "warning", Message: "X11Forwarding: yes (disable unless needed)"})
+	}
+
+	if v := config["AllowTcpForwarding"]; v == "no" {
+		checks = append(checks, model.Check{Status: "ok", Message: "AllowTcpForwarding: no"})
+	}
+
+	return model.Section{
+		Name:   "Security",
+		Status: sectionStatus(checks),
+		Checks: checks,
+	}
+}
+
+func readSSHConfig(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	config := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := parts[0]
+		val := strings.TrimSpace(parts[1])
+		val = strings.Trim(val, "\"")
+		if _, exists := config[key]; !exists {
+			config[key] = val
+		}
+	}
+	return config, scanner.Err()
+}
+
+func homeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/root"
+	}
+	return home
+}
+
+func checkStatus(ok bool) string {
+	if ok {
+		return "ok"
+	}
+	return "warning"
+}
+
+func sectionStatus(checks []model.Check) string {
+	status := "ok"
+	for _, c := range checks {
+		switch c.Status {
+		case "critical":
+			return "critical"
+		case "warning":
+			status = "warning"
+		case "unknown":
+			if status != "warning" && status != "critical" {
+				status = "unknown"
+			}
+		}
+	}
+	return status
+}
