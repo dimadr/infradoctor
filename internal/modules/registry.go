@@ -7,6 +7,7 @@ type Registry struct {
 func NewRegistry() *Registry {
 	r := &Registry{}
 	r.Register(&SSHModule{})
+	r.Register(&FirewallModule{})
 	return r
 }
 
