@@ -14,6 +14,8 @@ func NewRegistry() *Registry {
 	r.Register(&DockerModule{})
 	r.Register(&StorageModule{})
 	r.Register(&SystemdModule{})
+	r.Register(&NginxModule{})
+	r.Register(&SecurityModule{})
 	return r
 }
 
