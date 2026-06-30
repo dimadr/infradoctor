@@ -30,6 +30,7 @@ func (m *SSHModule) Diagnose(ctx context.Context) model.Result {
 	sections = append(sections, diagnoseSSHService(ctx))
 	sections = append(sections, diagnoseSSHConfig(ctx))
 	sections = append(sections, diagnoseSSHAuth(ctx))
+	sections = append(sections, diagnoseSSHKeys())
 	sections = append(sections, diagnoseSSHPermissions())
 	sections = append(sections, diagnoseSSHSecurity(ctx))
 
@@ -188,6 +189,68 @@ func diagnoseSSHAuth(ctx context.Context) model.Section {
 
 	return model.Section{
 		Name:   "Authentication",
+		Status: sectionStatus(checks),
+		Checks: checks,
+	}
+}
+
+func diagnoseSSHKeys() model.Section {
+	var checks []model.Check
+
+	authKeys := filepath.Join(homeDir(), ".ssh", "authorized_keys")
+	data, err := os.ReadFile(authKeys)
+	if err != nil {
+		checks = append(checks, model.Check{Status: "warning", Message: "No authorized_keys found — key-based auth may not work"})
+	} else {
+		count := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if strings.HasPrefix(line, "ssh-") || strings.HasPrefix(line, "ecdsa-") || strings.HasPrefix(line, "sk-") {
+				count++
+			}
+		}
+		if count == 0 {
+			checks = append(checks, model.Check{Status: "warning", Message: "authorized_keys exists but contains no valid keys"})
+		} else {
+			checks = append(checks, model.Check{Status: "ok", Message: fmt.Sprintf("authorized_keys: %d key(s) configured", count)})
+		}
+	}
+
+	hostKeyDir := "/etc/ssh"
+	hostKeyTypes := []struct{
+		file   string
+		keyType string
+	}{
+		{"ssh_host_rsa_key", "RSA"},
+		{"ssh_host_ecdsa_key", "ECDSA"},
+		{"ssh_host_ed25519_key", "Ed25519"},
+		{"ssh_host_dsa_key", "DSA"},
+	}
+
+	var found []string
+	for _, hk := range hostKeyTypes {
+		privPath := filepath.Join(hostKeyDir, hk.file)
+		pubPath := privPath + ".pub"
+
+		if info, err := os.Stat(privPath); err == nil {
+			perm := info.Mode().Perm()
+			if perm&0077 != 0 {
+				checks = append(checks, model.Check{Status: "warning", Message: fmt.Sprintf("%s: permissions %04o (should be 0600)", hk.file, perm)})
+			}
+			found = append(found, hk.keyType)
+		}
+		_ = pubPath
+	}
+
+	if len(found) > 0 {
+		checks = append(checks, model.Check{Status: "ok", Message: fmt.Sprintf("Host keys: %s", strings.Join(found, ", "))})
+	}
+
+	return model.Section{
+		Name:   "SSH Keys",
 		Status: sectionStatus(checks),
 		Checks: checks,
 	}
