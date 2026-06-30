@@ -1,66 +1,28 @@
 # TODO — InfraDoctor
 
-## v0.1 — CLI (current)
+## Done
 
-- [x] `infradoctor doctor` command
-- [x] Root check
-- [x] OS, kernel, hostname detection
-- [x] Interactive menu (`1,3,5` / `all`)
-- [x] Input validation
-- [x] `report.md` + `report.json`
-- [x] Secret masking (passwords, tokens, keys)
-- [x] Plugins → Modules refactoring
-
-## v0.2 — SSH Module
-
-- [x] Service status
-- [x] Configuration
-- [x] Authentication
-- [x] Permissions
-- [x] Security
-- [x] Recommendations
-
-## v0.3 — Firewall Module
-
-- [x] iptables / nftables / ufw detection
-- [x] Rules audit
-- [x] Default policies
-- [x] Recommendations
-
-## v0.4 — Networking Module
-
-- [ ] Interfaces
-- [ ] Routing
-- [ ] Listening ports
-- [ ] DNS
-- [ ] MTU
-- [ ] Recommendations
-
-## v0.5 — Nginx Module
-
-- [ ] Service status
-- [ ] Configuration validation
-- [ ] Virtual hosts
-- [ ] TLS
-- [ ] Logs
-- [ ] Recommendations
-
-## v0.6 — Docker Module
-
-- [ ] Service status
-- [ ] Containers
-- [ ] Images
-- [ ] Networks
-- [ ] Volumes
-- [ ] Compose
-- [ ] Recommendations
+- [x] v0.1 — CLI, root, OS, menu, reports, sanitize
+- [x] v0.2 — SSH Module
+- [x] v0.3 — Firewall Module
+- [x] Code quality: typed status constants, doc comments, helpers, dead code
+- [x] Structured Recommendation model (severity, context, impact, action, command, safe)
+- [x] v0.4 — Networking Module
+- [x] v0.5 — Docker Module
+- [x] v0.6 — Storage Module
+- [x] v0.7 — Systemd Module
+- [x] SSH enhancements: socket activation, listen address, DSA warning, AllowUsers/DenyUsers, PermitEmptyPasswords, GatewayPorts, PermitTunnel, PermitUserEnvironment
+- [x] Firewall enhancements: effective stack, DOCKER-USER chain
+- [x] v0.8 — Security Baseline Module
+- [x] Nginx Module
 
 ## Future
 
-- [ ] Systemd module
-- [ ] DNS module
-- [ ] Fail2ban module
-- [ ] Storage module
-- [ ] Journal module
+- [ ] SSH: authorized_keys for all shell users (not just root)
+- [ ] Networking: MTU, interface metrics
+- [ ] Docker: compose projects, healthcheck details
+- [ ] Storage: top-level directory sizes with depth limit
+- [ ] Journal module (journalctl output summary)
+- [ ] Nginx: container-aware detection
 - [ ] Archive/compression (tar.zst)
 - [ ] GitHub Actions release

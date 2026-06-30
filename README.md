@@ -67,14 +67,14 @@ infradoctor/
 │       ├── registry.go
 │       ├── ssh.go                # ✅ v0.2
 │       ├── firewall.go           # ✅ v0.3
-│       ├── nginx.go              # planned
-│       ├── docker.go             # planned
-│       ├── systemd.go            # planned
-│       ├── networking.go         # planned
-│       ├── dns.go                # planned
-│       ├── fail2ban.go           # planned
-│       ├── storage.go            # planned
-│       └── journal.go            # planned
+│       ├── networking.go         # ✅ v0.4
+│       ├── docker.go             # ✅ v0.5
+│       ├── storage.go            # ✅ v0.6
+│       ├── systemd.go            # ✅ v0.7
+│       ├── security.go           # ✅ v0.8
+│       ├── nginx.go              # added
+│       ├── helpers.go
+│       └── registry.go
 ├── testdata/
 ├── reports/examples/
 ├── go.mod
@@ -87,10 +87,14 @@ infradoctor/
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
 - [x] v0.2 — SSH Module
 - [x] v0.3 — Firewall Module
-- [ ] v0.4 — Networking Module
-- [ ] v0.5 — Nginx Module
-- [ ] v0.6 — Docker Module
-- [ ] ... остальные модули
+- [x] v0.4 — Networking Module
+- [x] v0.5 — Docker Module
+- [x] v0.6 — Storage Module
+- [x] v0.7 — Systemd Module
+- [x] v0.8 — Security Baseline Module
+- [x] Nginx Module
+
+
 
 ---
 
@@ -149,14 +153,14 @@ infradoctor/
 │       ├── registry.go
 │       ├── ssh.go                # ✅ v0.2
 │       ├── firewall.go           # ✅ v0.3
-│       ├── nginx.go              # planned
-│       ├── docker.go             # planned
-│       ├── systemd.go            # planned
-│       ├── networking.go         # planned
-│       ├── dns.go                # planned
-│       ├── fail2ban.go           # planned
-│       ├── storage.go            # planned
-│       └── journal.go            # planned
+│       ├── networking.go         # ✅ v0.4
+│       ├── docker.go             # ✅ v0.5
+│       ├── storage.go            # ✅ v0.6
+│       ├── systemd.go            # ✅ v0.7
+│       ├── security.go           # ✅ v0.8
+│       ├── nginx.go              # added
+│       ├── helpers.go
+│       └── registry.go
 ├── testdata/
 ├── reports/examples/
 ├── go.mod
@@ -169,10 +173,12 @@ infradoctor/
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
 - [x] v0.2 — SSH Module
 - [x] v0.3 — Firewall Module
-- [ ] v0.4 — Networking Module
-- [ ] v0.5 — Nginx Module
-- [ ] v0.6 — Docker Module
-- [ ] ... remaining modules
+- [x] v0.4 — Networking Module
+- [x] v0.5 — Docker Module
+- [x] v0.6 — Storage Module
+- [x] v0.7 — Systemd Module
+- [x] v0.8 — Security Baseline Module
+- [x] Nginx Module
 
 ---
 
