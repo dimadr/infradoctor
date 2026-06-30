@@ -1,0 +1,10 @@
+infradoctor
+*.exe
+report.md
+report.json
+vendor/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
