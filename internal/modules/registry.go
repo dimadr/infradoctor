@@ -10,6 +10,8 @@ func NewRegistry() *Registry {
 	r := &Registry{}
 	r.Register(&SSHModule{})
 	r.Register(&FirewallModule{})
+	r.Register(&NetworkingModule{})
+	r.Register(&DockerModule{})
 	return r
 }
 
