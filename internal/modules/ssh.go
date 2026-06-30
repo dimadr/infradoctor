@@ -72,22 +72,24 @@ func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 func diagnoseSSHService(ctx context.Context) model.Section {
 	var checks []model.Check
 
-	out, _ := runCmd(ctx, "systemctl", "is-active", "sshd")
+	unitName := detectSSHUnit(ctx)
+
+	out, _ := runCmd(ctx, "systemctl", "is-active", unitName)
 	if out == "" {
 		out = "unknown"
 	}
 	checks = append(checks, model.Check{
 		Status:  checkStatus(out == "active"),
-		Message: fmt.Sprintf("sshd service is %s", out),
+		Message: fmt.Sprintf("%s service is %s", unitName, out),
 	})
 
-	out, _ = runCmd(ctx, "systemctl", "is-enabled", "sshd")
+	out, _ = runCmd(ctx, "systemctl", "is-enabled", unitName)
 	if out == "" {
 		out = "unknown"
 	}
 	checks = append(checks, model.Check{
 		Status:  checkStatus(out == "enabled"),
-		Message: fmt.Sprintf("sshd is %s on boot", out),
+		Message: fmt.Sprintf("%s is %s on boot", unitName, out),
 	})
 
 	return model.Section{
@@ -95,6 +97,31 @@ func diagnoseSSHService(ctx context.Context) model.Section {
 		Status: sectionStatus(checks),
 		Checks: checks,
 	}
+}
+
+func detectSSHUnit(ctx context.Context) string {
+	var activeUnit, existingUnit string
+
+	for _, name := range []string{"sshd", "ssh"} {
+		out, err := runCmd(ctx, "systemctl", "is-active", name)
+		if err == nil && out == "active" {
+			activeUnit = name
+		}
+		if out == "" || strings.Contains(out, "could not be found") {
+			continue
+		}
+		if existingUnit == "" {
+			existingUnit = name
+		}
+	}
+
+	if activeUnit != "" {
+		return activeUnit
+	}
+	if existingUnit != "" {
+		return existingUnit
+	}
+	return "sshd"
 }
 
 func diagnoseSSHConfig(ctx context.Context) model.Section {

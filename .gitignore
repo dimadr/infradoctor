@@ -3,6 +3,7 @@ infradoctor
 report.md
 report.json
 vendor/
+backup/
 .idea/
 .vscode/
 *.swp

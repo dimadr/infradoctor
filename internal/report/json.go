@@ -22,7 +22,7 @@ func WriteJSON(osInfo model.OSInfo, results []model.Result) (string, error) {
 	rpt := JSONReport{
 		Generated: time.Now().Format(time.RFC3339),
 		System:    osInfo,
-		Results:   results,
+		Results:   sanitizeResults(results),
 	}
 
 	data, err := json.MarshalIndent(rpt, "", "  ")
@@ -35,4 +35,23 @@ func WriteJSON(osInfo model.OSInfo, results []model.Result) (string, error) {
 	}
 
 	return filename, nil
+}
+
+func sanitizeResults(results []model.Result) []model.Result {
+	out := make([]model.Result, len(results))
+	for i, r := range results {
+		r.Name = Sanitize(r.Name)
+		r.Summary = Sanitize(r.Summary)
+		for j, s := range r.Sections {
+			r.Sections[j].Name = Sanitize(s.Name)
+			for k, c := range s.Checks {
+				r.Sections[j].Checks[k].Message = Sanitize(c.Message)
+			}
+		}
+		for j, rec := range r.Recommendations {
+			r.Recommendations[j] = Sanitize(rec)
+		}
+		out[i] = r
+	}
+	return out
 }

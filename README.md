@@ -65,16 +65,16 @@ infradoctor/
 │   └── modules/       # диагностические модули
 │       ├── interface.go
 │       ├── registry.go
-│       ├── ssh.go
-│       ├── firewall.go
-│       ├── nginx.go
-│       ├── docker.go
-│       ├── systemd.go
-│       ├── networking.go
-│       ├── dns.go
-│       ├── fail2ban.go
-│       ├── storage.go
-│       └── journal.go
+│       ├── ssh.go                # ✅ v0.2
+│       ├── firewall.go           # planned
+│       ├── nginx.go              # planned
+│       ├── docker.go             # planned
+│       ├── systemd.go            # planned
+│       ├── networking.go         # planned
+│       ├── dns.go                # planned
+│       ├── fail2ban.go           # planned
+│       ├── storage.go            # planned
+│       └── journal.go            # planned
 ├── testdata/
 ├── reports/examples/
 ├── go.mod
@@ -85,7 +85,7 @@ infradoctor/
 **Дорожная карта**
 
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
-- [ ] v0.2 — SSH Module
+- [x] v0.2 — SSH Module
 - [ ] v0.3 — Firewall Module
 - [ ] v0.4 — Networking Module
 - [ ] v0.5 — Nginx Module
@@ -147,16 +147,16 @@ infradoctor/
 │   └── modules/
 │       ├── interface.go
 │       ├── registry.go
-│       ├── ssh.go
-│       ├── firewall.go
-│       ├── nginx.go
-│       ├── docker.go
-│       ├── systemd.go
-│       ├── networking.go
-│       ├── dns.go
-│       ├── fail2ban.go
-│       ├── storage.go
-│       └── journal.go
+│       ├── ssh.go                # ✅ v0.2
+│       ├── firewall.go           # planned
+│       ├── nginx.go              # planned
+│       ├── docker.go             # planned
+│       ├── systemd.go            # planned
+│       ├── networking.go         # planned
+│       ├── dns.go                # planned
+│       ├── fail2ban.go           # planned
+│       ├── storage.go            # planned
+│       └── journal.go            # planned
 ├── testdata/
 ├── reports/examples/
 ├── go.mod
@@ -167,7 +167,7 @@ infradoctor/
 **Roadmap**
 
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
-- [ ] v0.2 — SSH Module
+- [x] v0.2 — SSH Module
 - [ ] v0.3 — Firewall Module
 - [ ] v0.4 — Networking Module
 - [ ] v0.5 — Nginx Module

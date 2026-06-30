@@ -32,13 +32,13 @@ func WriteMD(osInfo model.OSInfo, results []model.Result) (string, error) {
 	fmt.Fprintln(f)
 
 	for _, r := range results {
-		fmt.Fprintf(f, "## %s\n\n", r.Name)
+		fmt.Fprintf(f, "## %s\n\n", Sanitize(r.Name))
 		fmt.Fprintf(f, "**Status:** %s\n\n", r.Status)
 
 		for _, s := range r.Sections {
-			fmt.Fprintf(f, "### %s\n\n", s.Name)
+			fmt.Fprintf(f, "### %s\n\n", Sanitize(s.Name))
 			for _, c := range s.Checks {
-				fmt.Fprintf(f, "- [%s] %s\n", c.Status, c.Message)
+				fmt.Fprintf(f, "- [%s] %s\n", c.Status, Sanitize(c.Message))
 			}
 			fmt.Fprintln(f)
 		}
@@ -47,7 +47,7 @@ func WriteMD(osInfo model.OSInfo, results []model.Result) (string, error) {
 			fmt.Fprintln(f, "### Recommendations")
 			fmt.Fprintln(f)
 			for _, rec := range r.Recommendations {
-				fmt.Fprintf(f, "- ⚠ %s\n", rec)
+				fmt.Fprintf(f, "- ⚠ %s\n", Sanitize(rec))
 			}
 			fmt.Fprintln(f)
 		}
