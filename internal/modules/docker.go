@@ -49,15 +49,6 @@ func diagnoseDockerEngine(ctx context.Context) model.Section {
 		checks = append(checks, model.Check{Status: model.StatusInfo, Message: fmt.Sprintf("Cgroup driver: %s", out)})
 	}
 
-	// Check if Docker manages iptables (relevant for firewall context)
-	infoOut, _ := runCmd(ctx, "docker", "info")
-	if strings.Contains(infoOut, "iptables") {
-		checks = append(checks, model.Check{
-			Status:  model.StatusInfo,
-			Message: "Docker manages iptables rules — UFW may not protect published ports without DOCKER-USER chain configuration",
-		})
-	}
-
 	return model.Section{
 		Name:   "Engine",
 		Status: sectionStatus(checks),

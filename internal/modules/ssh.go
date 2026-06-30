@@ -58,8 +58,10 @@ func diagnoseSSHService(ctx context.Context) model.Section {
 	if out == "" {
 		out = "unknown"
 	}
+
+	isActive := out == "active"
 	checks = append(checks, model.Check{
-		Status:  checkStatus(out == "active"),
+		Status:  checkStatus(isActive),
 		Message: fmt.Sprintf("%s service is %s", unitName, out),
 	})
 
@@ -71,6 +73,29 @@ func diagnoseSSHService(ctx context.Context) model.Section {
 		Status:  checkStatus(out == "enabled"),
 		Message: fmt.Sprintf("%s is %s on boot", unitName, out),
 	})
+
+	// Socket activation: on Ubuntu 24.04 ssh.socket may be active while ssh.service is not
+	sockOut, _ := runCmd(ctx, "systemctl", "is-active", "ssh.socket")
+	if sockOut == "active" {
+		checks = append(checks, model.Check{
+			Status:  model.StatusInfo,
+			Message: "ssh.socket is active — SSH works via socket activation even if ssh.service is inactive",
+		})
+	}
+
+	// Show actual listen address/port from ss
+	ssOut, _ := runCmd(ctx, "ss", "-tulpn")
+	for _, line := range strings.Split(ssOut, "\n") {
+		if strings.Contains(line, "sshd") {
+			fields := strings.Fields(line)
+			if len(fields) >= 5 {
+				checks = append(checks, model.Check{
+					Status:  model.StatusInfo,
+					Message: fmt.Sprintf("SSH listening on: %s (%s)", fields[4], fields[0]),
+				})
+			}
+		}
+	}
 
 	return model.Section{
 		Name:   "Service Status",
@@ -195,6 +220,30 @@ func diagnoseSSHAuth(ctx context.Context) model.Section {
 		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "ChallengeResponseAuthentication: yes"})
 	}
 
+	if v := config["allowusers"]; v != "" {
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "AllowUsers: " + v})
+	}
+	if v := config["allowgroups"]; v != "" {
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "AllowGroups: " + v})
+	}
+	if v := config["denyusers"]; v != "" {
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "DenyUsers: " + v})
+	}
+	if v := config["denygroups"]; v != "" {
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "DenyGroups: " + v})
+	}
+
+	val = config["permitemptypasswords"]
+	if val == "yes" {
+		checks = append(checks, model.Check{	Status: model.StatusCritical, Message: "PermitEmptyPasswords: yes (allows empty password logins)"})
+	} else if val == "no" {
+		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "PermitEmptyPasswords: no"})
+	}
+
+	if v := config["authenticationmethods"]; v != "" {
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "AuthenticationMethods: " + v})
+	}
+
 	return model.Section{
 		Name:   "Authentication",
 		Status: sectionStatus(checks),
@@ -239,6 +288,7 @@ func diagnoseSSHKeys() model.Section {
 	}
 
 	var found []string
+	hasDSA := false
 	for _, hk := range hostKeyTypes {
 		privPath := filepath.Join(hostKeyDir, hk.file)
 
@@ -247,8 +297,15 @@ func diagnoseSSHKeys() model.Section {
 			if perm&0077 != 0 {
 				checks = append(checks, model.Check{	Status: model.StatusWarning, Message: fmt.Sprintf("%s: permissions %04o (should be 0600)", hk.file, perm)})
 			}
+			if hk.keyType == "DSA" {
+				hasDSA = true
+			}
 			found = append(found, hk.keyType)
 		}
+	}
+
+	if hasDSA {
+		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "DSA host key present — DSA is deprecated and considered weak"})
 	}
 
 	if len(found) > 0 {
@@ -349,6 +406,18 @@ func diagnoseSSHSecurity(ctx context.Context) model.Section {
 
 	if v := config["allowtcpforwarding"]; v == "no" {
 		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "AllowTcpForwarding: no"})
+	}
+
+	if v := config["gatewayports"]; v == "yes" {
+		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "GatewayPorts: yes (allows remote hosts to connect to forwarded ports)"})
+	}
+
+	if v := config["permittunnel"]; v != "" && v != "no" {
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "PermitTunnel: " + v})
+	}
+
+	if v := config["permituserenvironment"]; v == "yes" {
+		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "PermitUserEnvironment: yes (may allow environment variable injection via ~/.ssh/environment)"})
 	}
 
 	return model.Section{
