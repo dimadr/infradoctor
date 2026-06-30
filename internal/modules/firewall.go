@@ -102,7 +102,7 @@ func diagnoseUFW(ctx context.Context) model.Section {
 	case "active":
 		checks = append(checks, model.Check{Status: "ok", Message: "UFW is active"})
 	case "inactive":
-		checks = append(checks, model.Check{Status: "warning", Message: "UFW is inactive"})
+		checks = append(checks, model.Check{Status: "warning", Message: "UFW is inactive — enable with: ufw enable"})
 	default:
 		checks = append(checks, model.Check{Status: "info", Message: "UFW status: " + status})
 	}
@@ -111,23 +111,32 @@ func diagnoseUFW(ctx context.Context) model.Section {
 		if defaultIn == "deny" || defaultIn == "reject" {
 			checks = append(checks, model.Check{Status: "ok", Message: "UFW default incoming: " + defaultIn})
 		} else {
-			checks = append(checks, model.Check{Status: "warning", Message: "UFW default incoming: " + defaultIn + " (consider 'deny')"})
+			checks = append(checks, model.Check{Status: "warning", Message: "UFW default incoming: " + defaultIn + " — set to deny: ufw default deny incoming"})
 		}
 	}
 	if defaultOut != "" {
 		checks = append(checks, model.Check{Status: "info", Message: "UFW default outgoing: " + defaultOut})
 	}
 
-	_ = logging
+	if logging != "" && logging != "on" {
+		checks = append(checks, model.Check{Status: "info", Message: "UFW logging: " + logging + " — enable with: ufw logging on"})
+	}
 
 	if status == "active" {
 		ruleCount := 0
+		hasSSH := false
 		for _, line := range lines {
 			if strings.Contains(line, "ALLOW") || strings.Contains(line, "DENY") || strings.Contains(line, "REJECT") || strings.Contains(line, "LIMIT") {
 				ruleCount++
+				if strings.Contains(line, "22") || strings.Contains(line, "ssh") {
+					hasSSH = true
+				}
 			}
 		}
 		checks = append(checks, model.Check{Status: "info", Message: fmt.Sprintf("UFW rules: %d", ruleCount)})
+		if !hasSSH {
+			checks = append(checks, model.Check{Status: "warning", Message: "No UFW rule for SSH (22/tcp) — add: ufw allow ssh"})
+		}
 	}
 
 	return model.Section{
