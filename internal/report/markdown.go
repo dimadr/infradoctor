@@ -47,9 +47,26 @@ func WriteMD(osInfo model.OSInfo, results []model.Result) (string, error) {
 			fmt.Fprintln(f, "### Recommendations")
 			fmt.Fprintln(f)
 			for _, rec := range r.Recommendations {
-				fmt.Fprintf(f, "- ⚠ %s\n", Sanitize(rec))
+				title := Sanitize(rec.Title)
+				fmt.Fprintf(f, "#### %s\n\n", title)
+				fmt.Fprintf(f, "| Field | Value |\n")
+				fmt.Fprintf(f, "|-------|-------|\n")
+				fmt.Fprintf(f, "| Severity | %s |\n", rec.Severity)
+				if rec.Context != "" {
+					fmt.Fprintf(f, "| Context | %s |\n", Sanitize(rec.Context))
+				}
+				if rec.Impact != "" {
+					fmt.Fprintf(f, "| Impact | %s |\n", Sanitize(rec.Impact))
+				}
+				if rec.Action != "" {
+					fmt.Fprintf(f, "| Action | %s |\n", Sanitize(rec.Action))
+				}
+				if rec.Command != "" {
+					fmt.Fprintf(f, "| Command | `%s` |\n", Sanitize(rec.Command))
+				}
+				fmt.Fprintf(f, "| Safe | %t |\n", rec.Safe)
+				fmt.Fprintln(f)
 			}
-			fmt.Fprintln(f)
 		}
 	}
 

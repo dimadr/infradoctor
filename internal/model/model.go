@@ -21,14 +21,25 @@ type OSInfo struct {
 	Kernel     string `json:"kernel"`
 }
 
+// Recommendation is a structured recommendation with context, impact, and action.
+type Recommendation struct {
+	Severity Status `json:"severity"`
+	Title    string `json:"title"`
+	Context  string `json:"context,omitempty"`
+	Impact   string `json:"impact,omitempty"`
+	Action   string `json:"action,omitempty"`
+	Command  string `json:"command,omitempty"`
+	Safe     bool   `json:"safe"`
+}
+
 // Result holds the full diagnostic output of a single module.
 type Result struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Status          Status          `json:"status"`
-	Summary         string          `json:"summary,omitempty"`
-	Sections        []Section       `json:"sections,omitempty"`
-	Recommendations []string        `json:"recommendations,omitempty"`
+	ID              string           `json:"id"`
+	Name            string           `json:"name"`
+	Status          Status           `json:"status"`
+	Summary         string           `json:"summary,omitempty"`
+	Sections        []Section        `json:"sections,omitempty"`
+	Recommendations []Recommendation `json:"recommendations,omitempty"`
 }
 
 // Section is a named group of checks within a module result.

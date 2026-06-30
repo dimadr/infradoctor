@@ -20,13 +20,17 @@ func aggregateStatus(sections []model.Section) model.Status {
 	return s
 }
 
-// collectRecommendations gathers recommendation messages from warning/critical checks.
-func collectRecommendations(sections []model.Section) []string {
-	var recs []string
+// collectRecommendations creates Recommendation structs from warning/critical checks.
+func collectRecommendations(sections []model.Section) []model.Recommendation {
+	var recs []model.Recommendation
 	for _, sec := range sections {
 		for _, c := range sec.Checks {
 			if c.Status == model.StatusWarning || c.Status == model.StatusCritical {
-				recs = append(recs, c.Message)
+				recs = append(recs, model.Recommendation{
+					Severity: c.Status,
+					Title:    c.Message,
+					Safe:     false,
+				})
 			}
 		}
 	}

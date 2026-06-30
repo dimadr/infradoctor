@@ -42,10 +42,14 @@ func sanitizeResults(results []model.Result) []model.Result {
 	for i, r := range results {
 		r.Name = Sanitize(r.Name)
 		r.Summary = Sanitize(r.Summary)
-		r.Recommendations = make([]string, len(r.Recommendations))
+		r.Recommendations = make([]model.Recommendation, len(r.Recommendations))
 		copy(r.Recommendations, results[i].Recommendations)
 		for j := range r.Recommendations {
-			r.Recommendations[j] = Sanitize(r.Recommendations[j])
+			r.Recommendations[j].Title = Sanitize(r.Recommendations[j].Title)
+			r.Recommendations[j].Context = Sanitize(r.Recommendations[j].Context)
+			r.Recommendations[j].Impact = Sanitize(r.Recommendations[j].Impact)
+			r.Recommendations[j].Action = Sanitize(r.Recommendations[j].Action)
+			r.Recommendations[j].Command = Sanitize(r.Recommendations[j].Command)
 		}
 		r.Sections = make([]model.Section, len(r.Sections))
 		copy(r.Sections, results[i].Sections)
