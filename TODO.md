@@ -13,19 +13,19 @@
 
 ## v0.2 — SSH Module
 
-- [ ] Service status
-- [ ] Configuration
-- [ ] Authentication
-- [ ] Permissions
-- [ ] Security
-- [ ] Recommendations
+- [x] Service status
+- [x] Configuration
+- [x] Authentication
+- [x] Permissions
+- [x] Security
+- [x] Recommendations
 
 ## v0.3 — Firewall Module
 
-- [ ] iptables / nftables / ufw detection
-- [ ] Rules audit
-- [ ] Default policies
-- [ ] Recommendations
+- [x] iptables / nftables / ufw detection
+- [x] Rules audit
+- [x] Default policies
+- [x] Recommendations
 
 ## v0.4 — Networking Module
 

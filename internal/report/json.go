@@ -42,14 +42,20 @@ func sanitizeResults(results []model.Result) []model.Result {
 	for i, r := range results {
 		r.Name = Sanitize(r.Name)
 		r.Summary = Sanitize(r.Summary)
-		for j, s := range r.Sections {
-			r.Sections[j].Name = Sanitize(s.Name)
-			for k, c := range s.Checks {
-				r.Sections[j].Checks[k].Message = Sanitize(c.Message)
-			}
+		r.Recommendations = make([]string, len(r.Recommendations))
+		copy(r.Recommendations, results[i].Recommendations)
+		for j := range r.Recommendations {
+			r.Recommendations[j] = Sanitize(r.Recommendations[j])
 		}
-		for j, rec := range r.Recommendations {
-			r.Recommendations[j] = Sanitize(rec)
+		r.Sections = make([]model.Section, len(r.Sections))
+		copy(r.Sections, results[i].Sections)
+		for j := range r.Sections {
+			r.Sections[j].Name = Sanitize(r.Sections[j].Name)
+			r.Sections[j].Checks = make([]model.Check, len(r.Sections[j].Checks))
+			copy(r.Sections[j].Checks, results[i].Sections[j].Checks)
+			for k := range r.Sections[j].Checks {
+				r.Sections[j].Checks[k].Message = Sanitize(r.Sections[j].Checks[k].Message)
+			}
 		}
 		out[i] = r
 	}

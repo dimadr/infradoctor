@@ -98,11 +98,19 @@ func diagnoseUFW(ctx context.Context) model.Section {
 		}
 	}
 
+	sshPort := detectSSHPort(lines)
+
 	switch status {
 	case "active":
 		checks = append(checks, model.Check{Status: "ok", Message: "UFW is active"})
 	case "inactive":
-		checks = append(checks, model.Check{Status: "warning", Message: "UFW is inactive — enable with: ufw enable"})
+		msg := "UFW is inactive"
+		if sshPort != "" {
+			msg += " — to enable safely: ufw allow " + sshPort + " && ufw enable"
+		} else {
+			msg += " — ensure SSH is allowed before: ufw enable"
+		}
+		checks = append(checks, model.Check{Status: "warning", Message: msg})
 	default:
 		checks = append(checks, model.Check{Status: "info", Message: "UFW status: " + status})
 	}
@@ -111,7 +119,7 @@ func diagnoseUFW(ctx context.Context) model.Section {
 		if defaultIn == "deny" || defaultIn == "reject" {
 			checks = append(checks, model.Check{Status: "ok", Message: "UFW default incoming: " + defaultIn})
 		} else {
-			checks = append(checks, model.Check{Status: "warning", Message: "UFW default incoming: " + defaultIn + " — set to deny: ufw default deny incoming"})
+			checks = append(checks, model.Check{Status: "warning", Message: "UFW default incoming: " + defaultIn + " — ensure SSH is allowed before setting: ufw default deny incoming"})
 		}
 	}
 	if defaultOut != "" {
@@ -126,16 +134,17 @@ func diagnoseUFW(ctx context.Context) model.Section {
 		ruleCount := 0
 		hasSSH := false
 		for _, line := range lines {
-			if strings.Contains(line, "ALLOW") || strings.Contains(line, "DENY") || strings.Contains(line, "REJECT") || strings.Contains(line, "LIMIT") {
+			upper := strings.ToUpper(line)
+			if strings.Contains(upper, "ALLOW") || strings.Contains(upper, "DENY") || strings.Contains(upper, "REJECT") || strings.Contains(upper, "LIMIT") {
 				ruleCount++
-				if strings.Contains(line, "22") || strings.Contains(line, "ssh") {
+				if strings.Contains(line, sshPort) || strings.Contains(upper, "SSH") || strings.Contains(line, "/22") {
 					hasSSH = true
 				}
 			}
 		}
 		checks = append(checks, model.Check{Status: "info", Message: fmt.Sprintf("UFW rules: %d", ruleCount)})
 		if !hasSSH {
-			checks = append(checks, model.Check{Status: "warning", Message: "No UFW rule for SSH (22/tcp) — add: ufw allow ssh"})
+			checks = append(checks, model.Check{Status: "warning", Message: "No UFW rule for SSH — add: ufw allow " + sshPort})
 		}
 	}
 
@@ -213,6 +222,7 @@ func diagnoseNFTables(ctx context.Context) model.Section {
 	tableCount := 0
 	chainCount := 0
 	ruleCount := 0
+	inChain := false
 
 	for _, line := range strings.Split(out, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -221,7 +231,10 @@ func diagnoseNFTables(ctx context.Context) model.Section {
 			tableCount++
 		case strings.HasPrefix(trimmed, "chain "):
 			chainCount++
-		case strings.Contains(line, "counter"):
+			inChain = true
+		case trimmed == "}":
+			inChain = false
+		case inChain && trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "type "):
 			ruleCount++
 		}
 	}
@@ -263,4 +276,36 @@ func countRules(output string) int {
 		count++
 	}
 	return count
+}
+
+func detectSSHPort(lines []string) string {
+	// Look for "22/tcp" or "22" in UFW rule lines like:
+	// 22/tcp                     ALLOW IN    Anywhere
+	// Also try to find SSH port from sshd config
+	port := "22/tcp"
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Match numbered ports like "2222/tcp" or "2222" in UFW rules
+		fields := strings.Fields(line)
+		if len(fields) >= 1 {
+			first := fields[0]
+			if strings.HasSuffix(first, "/tcp") || strings.HasSuffix(first, "/udp") {
+				if !strings.EqualFold(first, "anywhere") && !strings.Contains(first, ":") {
+					port = first
+					return port
+				}
+			}
+		}
+		// Also match lines with "ssh" service name
+		if strings.Contains(strings.ToLower(line), "ssh") {
+			// Check that it's actually a service name, not part of a comment
+			fields := strings.Fields(line)
+			for _, f := range fields {
+				if strings.EqualFold(f, "ssh") {
+					return "ssh"
+				}
+			}
+		}
+	}
+	return port
 }

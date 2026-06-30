@@ -161,18 +161,21 @@ func diagnoseSSHConfig(ctx context.Context) model.Section {
 }
 
 func diagnoseSSHAuth(ctx context.Context) model.Section {
-	config, err := readSSHConfig("/etc/ssh/sshd_config")
+	config, err := readEffectiveConfig(ctx)
 	if err != nil {
-		return model.Section{
-			Name:   "Authentication",
-			Status: "unknown",
-			Checks: []model.Check{{Status: "unknown", Message: fmt.Sprintf("cannot read sshd_config: %v", err)}},
+		config, err = readSSHConfig("/etc/ssh/sshd_config")
+		if err != nil {
+			return model.Section{
+				Name:   "Authentication",
+				Status: "unknown",
+				Checks: []model.Check{{Status: "unknown", Message: fmt.Sprintf("cannot read sshd_config: %v", err)}},
+			}
 		}
 	}
 
 	var checks []model.Check
 
-	val := config["PermitRootLogin"]
+	val := config["permitrootlogin"]
 	switch val {
 	case "yes":
 		checks = append(checks, model.Check{Status: "warning", Message: "PermitRootLogin: yes (consider 'prohibit-password' or 'no')"})
@@ -184,7 +187,7 @@ func diagnoseSSHAuth(ctx context.Context) model.Section {
 		checks = append(checks, model.Check{Status: "info", Message: "PermitRootLogin: " + val})
 	}
 
-	val = config["PasswordAuthentication"]
+	val = config["passwordauthentication"]
 	switch val {
 	case "yes":
 		checks = append(checks, model.Check{Status: "warning", Message: "PasswordAuthentication: yes (consider key-based auth)"})
@@ -194,7 +197,7 @@ func diagnoseSSHAuth(ctx context.Context) model.Section {
 		checks = append(checks, model.Check{Status: "info", Message: "PasswordAuthentication: " + val})
 	}
 
-	val = config["PubkeyAuthentication"]
+	val = config["pubkeyauthentication"]
 	switch val {
 	case "yes":
 		checks = append(checks, model.Check{Status: "ok", Message: "PubkeyAuthentication: yes"})
@@ -204,12 +207,12 @@ func diagnoseSSHAuth(ctx context.Context) model.Section {
 		checks = append(checks, model.Check{Status: "info", Message: "PubkeyAuthentication: " + val})
 	}
 
-	val = config["KbdInteractiveAuthentication"]
+	val = config["kbdinteractiveauthentication"]
 	if val == "yes" {
 		checks = append(checks, model.Check{Status: "info", Message: "KbdInteractiveAuthentication: yes"})
 	}
 
-	val = config["ChallengeResponseAuthentication"]
+	val = config["challengeresponseauthentication"]
 	if val == "yes" {
 		checks = append(checks, model.Check{Status: "info", Message: "ChallengeResponseAuthentication: yes"})
 	}
@@ -318,18 +321,21 @@ func diagnoseSSHPermissions() model.Section {
 }
 
 func diagnoseSSHSecurity(ctx context.Context) model.Section {
-	config, err := readSSHConfig("/etc/ssh/sshd_config")
+	config, err := readEffectiveConfig(ctx)
 	if err != nil {
-		return model.Section{
-			Name:   "Security",
-			Status: "unknown",
-			Checks: []model.Check{{Status: "unknown", Message: fmt.Sprintf("cannot read sshd_config: %v", err)}},
+		config, err = readSSHConfig("/etc/ssh/sshd_config")
+		if err != nil {
+			return model.Section{
+				Name:   "Security",
+				Status: "unknown",
+				Checks: []model.Check{{Status: "unknown", Message: fmt.Sprintf("cannot read sshd_config: %v", err)}},
+			}
 		}
 	}
 
 	var checks []model.Check
 
-	if v := config["Protocol"]; v != "" {
+	if v := config["protocol"]; v != "" {
 		if v == "1" {
 			checks = append(checks, model.Check{Status: "critical", Message: "Protocol: 1 (insecure, use Protocol 2)"})
 		} else {
@@ -337,7 +343,7 @@ func diagnoseSSHSecurity(ctx context.Context) model.Section {
 		}
 	}
 
-	if v := config["LogLevel"]; v != "" {
+	if v := config["loglevel"]; v != "" {
 		if v == "INFO" || v == "VERBOSE" {
 			checks = append(checks, model.Check{Status: "ok", Message: "LogLevel: " + v})
 		} else {
@@ -345,7 +351,7 @@ func diagnoseSSHSecurity(ctx context.Context) model.Section {
 		}
 	}
 
-	if v := config["MaxAuthTries"]; v != "" {
+	if v := config["maxauthtries"]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n <= 3 {
 			checks = append(checks, model.Check{Status: "ok", Message: "MaxAuthTries: " + v})
 		} else {
@@ -353,19 +359,19 @@ func diagnoseSSHSecurity(ctx context.Context) model.Section {
 		}
 	}
 
-	if v := config["ClientAliveInterval"]; v != "" && v != "0" {
+	if v := config["clientaliveinterval"]; v != "" && v != "0" {
 		checks = append(checks, model.Check{Status: "ok", Message: "ClientAliveInterval: " + v})
 	}
 
-	if v := config["UsePAM"]; v == "yes" {
+	if v := config["usepam"]; v == "yes" {
 		checks = append(checks, model.Check{Status: "ok", Message: "UsePAM: yes"})
 	}
 
-	if v := config["X11Forwarding"]; v == "yes" {
+	if v := config["x11forwarding"]; v == "yes" {
 		checks = append(checks, model.Check{Status: "warning", Message: "X11Forwarding: yes (disable unless needed)"})
 	}
 
-	if v := config["AllowTcpForwarding"]; v == "no" {
+	if v := config["allowtcpforwarding"]; v == "no" {
 		checks = append(checks, model.Check{Status: "ok", Message: "AllowTcpForwarding: no"})
 	}
 
@@ -436,6 +442,25 @@ func parseSSHFile(path string, config map[string]string, includes *[]string, bas
 		config[key] = val
 	}
 	return scanner.Err()
+}
+
+func readEffectiveConfig(ctx context.Context) (map[string]string, error) {
+	out, err := runCmd(ctx, "sshd", "-T")
+	if err != nil {
+		return nil, fmt.Errorf("sshd -T: %w", err)
+	}
+	config := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 2 {
+			config[parts[0]] = strings.TrimSpace(parts[1])
+		}
+	}
+	return config, nil
 }
 
 func homeDir() string {

@@ -66,7 +66,7 @@ infradoctor/
 │       ├── interface.go
 │       ├── registry.go
 │       ├── ssh.go                # ✅ v0.2
-│       ├── firewall.go           # planned
+│       ├── firewall.go           # ✅ v0.3
 │       ├── nginx.go              # planned
 │       ├── docker.go             # planned
 │       ├── systemd.go            # planned
@@ -86,7 +86,7 @@ infradoctor/
 
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
 - [x] v0.2 — SSH Module
-- [ ] v0.3 — Firewall Module
+- [x] v0.3 — Firewall Module
 - [ ] v0.4 — Networking Module
 - [ ] v0.5 — Nginx Module
 - [ ] v0.6 — Docker Module
@@ -148,7 +148,7 @@ infradoctor/
 │       ├── interface.go
 │       ├── registry.go
 │       ├── ssh.go                # ✅ v0.2
-│       ├── firewall.go           # planned
+│       ├── firewall.go           # ✅ v0.3
 │       ├── nginx.go              # planned
 │       ├── docker.go             # planned
 │       ├── systemd.go            # planned
@@ -168,7 +168,7 @@ infradoctor/
 
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
 - [x] v0.2 — SSH Module
-- [ ] v0.3 — Firewall Module
+- [x] v0.3 — Firewall Module
 - [ ] v0.4 — Networking Module
 - [ ] v0.5 — Nginx Module
 - [ ] v0.6 — Docker Module
