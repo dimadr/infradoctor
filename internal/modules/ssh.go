@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dimadr/infradoctor/internal/model"
@@ -254,7 +256,7 @@ func diagnoseSSHSecurity(ctx context.Context) model.Section {
 	}
 
 	if v := config["MaxAuthTries"]; v != "" {
-		if v <= "3" {
+		if n, err := strconv.Atoi(v); err == nil && n <= 3 {
 			checks = append(checks, model.Check{Status: "ok", Message: "MaxAuthTries: " + v})
 		} else {
 			checks = append(checks, model.Check{Status: "warning", Message: "MaxAuthTries: " + v + " (consider ≤ 3)"})
@@ -285,13 +287,35 @@ func diagnoseSSHSecurity(ctx context.Context) model.Section {
 }
 
 func readSSHConfig(path string) (map[string]string, error) {
+	config := make(map[string]string)
+	var includes []string
+
+	baseDir := filepath.Dir(path)
+	if err := parseSSHFile(path, config, &includes, baseDir); err != nil {
+		return nil, err
+	}
+
+	for _, pattern := range includes {
+		files, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		sort.Strings(files)
+		for _, f := range files {
+			parseSSHFile(f, config, nil, baseDir)
+		}
+	}
+
+	return config, nil
+}
+
+func parseSSHFile(path string, config map[string]string, includes *[]string, baseDir string) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer f.Close()
 
-	config := make(map[string]string)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -304,12 +328,24 @@ func readSSHConfig(path string) (map[string]string, error) {
 		}
 		key := parts[0]
 		val := strings.TrimSpace(parts[1])
-		val = strings.Trim(val, "\"")
-		if _, exists := config[key]; !exists {
-			config[key] = val
+
+		if strings.EqualFold(key, "include") {
+			if includes != nil {
+				val = strings.Trim(val, "\"")
+				for _, p := range strings.Fields(val) {
+					if !filepath.IsAbs(p) {
+						p = filepath.Join(baseDir, p)
+					}
+					*includes = append(*includes, p)
+				}
+			}
+			continue
 		}
+
+		val = strings.Trim(val, "\"")
+		config[key] = val
 	}
-	return config, scanner.Err()
+	return scanner.Err()
 }
 
 func homeDir() string {
