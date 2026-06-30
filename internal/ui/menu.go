@@ -6,6 +6,7 @@ import (
 	"github.com/dimadr/infradoctor/internal/modules"
 )
 
+// ShowMenu prints the numbered list of detected components.
 func ShowMenu(items []modules.Module) {
 	fmt.Println("Detected components:")
 	for i, m := range items {

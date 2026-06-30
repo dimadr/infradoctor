@@ -9,6 +9,7 @@ import (
 	"github.com/dimadr/infradoctor/internal/model"
 )
 
+// FirewallModule diagnoses UFW, iptables, and nftables firewall state.
 type FirewallModule struct{}
 
 func (m *FirewallModule) ID() string   { return "firewall" }
@@ -24,7 +25,6 @@ func (m *FirewallModule) Detect() bool {
 
 func (m *FirewallModule) Diagnose(ctx context.Context) model.Result {
 	var sections []model.Section
-	var recommendations []string
 
 	if hasBinary("ufw") {
 		sections = append(sections, diagnoseUFW(ctx))
@@ -34,32 +34,12 @@ func (m *FirewallModule) Diagnose(ctx context.Context) model.Result {
 		sections = append(sections, diagnoseNFTables(ctx))
 	}
 
-	for _, s := range sections {
-		for _, c := range s.Checks {
-			if c.Status == "warning" || c.Status == "critical" {
-				recommendations = append(recommendations, c.Message)
-			}
-		}
-	}
-
-	status := "ok"
-	for _, s := range sections {
-		switch s.Status {
-		case "critical":
-			status = "critical"
-		case "warning":
-			if status != "critical" {
-				status = "warning"
-			}
-		}
-	}
-
 	return model.Result{
 		ID:              m.ID(),
 		Name:            m.Name(),
-		Status:          status,
+		Status:          aggregateStatus(sections),
 		Sections:        sections,
-		Recommendations: recommendations,
+		Recommendations: collectRecommendations(sections),
 	}
 }
 
@@ -74,7 +54,7 @@ func diagnoseUFW(ctx context.Context) model.Section {
 	out, _ := runCmd(ctx, "ufw", "status", "verbose")
 	lines := strings.Split(out, "\n")
 
-	status := "unknown"
+	status := model.StatusUnknown
 	defaultIn := ""
 	defaultOut := ""
 	logging := ""
@@ -83,7 +63,7 @@ func diagnoseUFW(ctx context.Context) model.Section {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "Status: "):
-			status = strings.TrimPrefix(line, "Status: ")
+			status = model.Status(strings.TrimPrefix(line, "Status: "))
 		case strings.HasPrefix(line, "Default: "):
 			parts := strings.Split(strings.TrimPrefix(line, "Default: "), " (")
 			if len(parts) > 0 {
@@ -102,7 +82,7 @@ func diagnoseUFW(ctx context.Context) model.Section {
 
 	switch status {
 	case "active":
-		checks = append(checks, model.Check{Status: "ok", Message: "UFW is active"})
+		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "UFW is active"})
 	case "inactive":
 		msg := "UFW is inactive"
 		if sshPort != "" {
@@ -110,24 +90,24 @@ func diagnoseUFW(ctx context.Context) model.Section {
 		} else {
 			msg += " — ensure SSH is allowed before: ufw enable"
 		}
-		checks = append(checks, model.Check{Status: "warning", Message: msg})
+		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: msg})
 	default:
-		checks = append(checks, model.Check{Status: "info", Message: "UFW status: " + status})
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "UFW status: " + string(status)})
 	}
 
 	if defaultIn != "" {
 		if defaultIn == "deny" || defaultIn == "reject" {
-			checks = append(checks, model.Check{Status: "ok", Message: "UFW default incoming: " + defaultIn})
+			checks = append(checks, model.Check{	Status: model.StatusOK, Message: "UFW default incoming: " + defaultIn})
 		} else {
-			checks = append(checks, model.Check{Status: "warning", Message: "UFW default incoming: " + defaultIn + " — ensure SSH is allowed before setting: ufw default deny incoming"})
+			checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "UFW default incoming: " + defaultIn + " — ensure SSH is allowed before setting: ufw default deny incoming"})
 		}
 	}
 	if defaultOut != "" {
-		checks = append(checks, model.Check{Status: "info", Message: "UFW default outgoing: " + defaultOut})
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "UFW default outgoing: " + defaultOut})
 	}
 
 	if logging != "" && logging != "on" {
-		checks = append(checks, model.Check{Status: "info", Message: "UFW logging: " + logging + " — enable with: ufw logging on"})
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "UFW logging: " + logging + " — enable with: ufw logging on"})
 	}
 
 	if status == "active" {
@@ -142,9 +122,9 @@ func diagnoseUFW(ctx context.Context) model.Section {
 				}
 			}
 		}
-		checks = append(checks, model.Check{Status: "info", Message: fmt.Sprintf("UFW rules: %d", ruleCount)})
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: fmt.Sprintf("UFW rules: %d", ruleCount)})
 		if !hasSSH {
-			checks = append(checks, model.Check{Status: "warning", Message: "No UFW rule for SSH — add: ufw allow " + sshPort})
+			checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "No UFW rule for SSH — add: ufw allow " + sshPort})
 		}
 	}
 
@@ -162,8 +142,8 @@ func diagnoseIPTables(ctx context.Context) model.Section {
 	hasIPv6 := hasBinary("ip6tables")
 
 	if !hasIPTables {
-		checks = append(checks, model.Check{Status: "info", Message: "iptables not installed"})
-		return model.Section{Name: "iptables", Status: "info", Checks: checks}
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "iptables not installed"})
+		return model.Section{Name: "iptables", 	Status: model.StatusInfo, Checks: checks}
 	}
 
 	chains := []string{"INPUT", "FORWARD", "OUTPUT"}
@@ -171,12 +151,12 @@ func diagnoseIPTables(ctx context.Context) model.Section {
 		out, _ := runCmd(ctx, "iptables", "-L", chain, "-n", "--line-numbers")
 		policy := extractPolicy(out)
 		if policy != "" {
-			status := "ok"
+			status := model.StatusOK
 			if chain == "INPUT" && policy != "DROP" && policy != "REJECT" {
-				status = "warning"
+				status = model.StatusWarning
 			}
 			if chain == "FORWARD" && policy != "DROP" && policy != "REJECT" {
-				status = "warning"
+				status = model.StatusWarning
 			}
 			checks = append(checks, model.Check{
 				Status:  status,
@@ -186,7 +166,7 @@ func diagnoseIPTables(ctx context.Context) model.Section {
 
 		rules := countRules(out)
 		if rules > 0 {
-			checks = append(checks, model.Check{Status: "info", Message: fmt.Sprintf("iptables %s: %d rules", chain, rules)})
+			checks = append(checks, model.Check{	Status: model.StatusInfo, Message: fmt.Sprintf("iptables %s: %d rules", chain, rules)})
 		}
 	}
 
@@ -199,7 +179,7 @@ func diagnoseIPTables(ctx context.Context) model.Section {
 			}
 		}
 		if v6Rules {
-			checks = append(checks, model.Check{Status: "info", Message: "ip6tables has IPv6 rules"})
+			checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "ip6tables has IPv6 rules"})
 		}
 	}
 
@@ -215,8 +195,8 @@ func diagnoseNFTables(ctx context.Context) model.Section {
 
 	out, _ := runCmd(ctx, "nft", "list", "ruleset")
 	if out == "" {
-		checks = append(checks, model.Check{Status: "info", Message: "nftables: no ruleset found"})
-		return model.Section{Name: "nftables", Status: "info", Checks: checks}
+		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "nftables: no ruleset found"})
+		return model.Section{Name: "nftables", 	Status: model.StatusInfo, Checks: checks}
 	}
 
 	tableCount := 0
@@ -239,7 +219,7 @@ func diagnoseNFTables(ctx context.Context) model.Section {
 		}
 	}
 
-	checks = append(checks, model.Check{Status: "ok", Message: fmt.Sprintf("nftables: %d tables, %d chains, %d rules", tableCount, chainCount, ruleCount)})
+	checks = append(checks, model.Check{	Status: model.StatusOK, Message: fmt.Sprintf("nftables: %d tables, %d chains, %d rules", tableCount, chainCount, ruleCount)})
 
 	return model.Section{
 		Name:   "nftables",

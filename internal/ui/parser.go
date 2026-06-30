@@ -10,6 +10,7 @@ import (
 	"github.com/dimadr/infradoctor/internal/modules"
 )
 
+// AskSelection shows the menu and reads user selection.
 func AskSelection(items []modules.Module) ([]modules.Module, error) {
 	ShowMenu(items)
 

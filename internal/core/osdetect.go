@@ -53,6 +53,7 @@ func parseOSRelease(path string, info *model.OSInfo) {
 			info.ID = val
 		}
 	}
+	_ = scanner.Err()
 }
 
 func splitKV(line string) (key, val string, ok bool) {

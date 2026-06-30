@@ -9,12 +9,15 @@ import (
 	"github.com/dimadr/infradoctor/internal/ui"
 )
 
+// App is the top-level application that orchestrates diagnosis.
 type App struct{}
 
+// NewApp creates a new App.
 func NewApp() *App {
 	return &App{}
 }
 
+// Run executes the full diagnostic workflow.
 func (a *App) Run() error {
 	if err := CheckRoot(); err != nil {
 		return err

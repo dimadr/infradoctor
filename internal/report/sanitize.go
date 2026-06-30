@@ -9,7 +9,7 @@ var secretPatterns = []struct {
 	repl string
 }{
 	// password assignments
-	{regexp.MustCompile(`(?i)(password\s*[=:]\s*)\S+`), "${1}***MASKED***"},
+	{regexp.MustCompile(`(?i)(\bpassword\s*[=:]\s*)\S+`), "${1}***MASKED***"},
 	// bearer tokens
 	{regexp.MustCompile(`(?i)(bearer\s+)\S+`), "${1}***MASKED***"},
 	// authorization headers

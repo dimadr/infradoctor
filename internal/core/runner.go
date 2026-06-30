@@ -8,6 +8,7 @@ import (
 	"github.com/dimadr/infradoctor/internal/modules"
 )
 
+// Run executes Diagnose on each selected module and returns results.
 func Run(selected []modules.Module) []model.Result {
 	ctx := context.Background()
 	var results []model.Result
