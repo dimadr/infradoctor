@@ -204,6 +204,7 @@ func diagnoseDockerContainers(ctx context.Context) (model.Section, []model.Recom
 
 	if exposedRisky > 0 {
 		checks = append(checks, model.Check{
+			Code:    "docker.exposed_critical",
 			Status:  model.StatusWarning,
 			Message: fmt.Sprintf("%d container(s) expose risky services (DB/Redis) on all interfaces", exposedRisky),
 		})
