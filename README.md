@@ -1,203 +1,281 @@
 # InfraDoctor
 
-> Read-only Linux server diagnostics.
+**Read-only диагностика Linux-серверов. Одна команда. Без агентов. Без телеметрии.**
+
+InfraDoctor анализирует состояние Linux-сервера локально и формирует структурированный отчет. Программа никогда не изменяет систему и никогда не передает данные за пределы сервера.
 
 ---
 
-## Русский
+# Зачем
 
-**Для чего это делается**
+При диагностике сервера больше всего времени обычно уходит не на поиск проблемы, а на сбор информации.
 
-Диагностика Linux-сервера одной командой. Быстро понять состояние SSH,
-веб-сервера, Docker, сети, фаервола — без установки агентов и без отправки
-данных наружу.
+InfraDoctor автоматизирует этот процесс и за несколько секунд собирает полную картину состояния наиболее важных компонентов системы.
 
-**Как работает**
+Поддерживаемые модули:
 
-1. `sudo infradoctor doctor`
-2. Проверка root
-3. Определение ОС, ядра, hostname
-4. Поиск установленных компонентов
-5. Интерактивный выбор: `1,3,5` или `all`
-6. Read-only диагностика каждого компонента
-7. Маскирование секретов
-8. `report.md` + `report.json`
+- SSH
+- Firewall
+- Networking
+- Docker
+- Nginx
+- Storage
+- Systemd
+- Security Baseline
 
-**Что использует для работы**
+Проект предназначен для системных администраторов, DevOps-инженеров, специалистов по информационной безопасности и AI-диагностики.
 
-- Go 1.22, только стандартная библиотека
-- Чтение файлов (`/etc/os-release`, конфиги, `/proc/`)
-- `os/exec` для запуска штатных команд (`systemctl`, `ss`, `iptables`, `docker`)
-- `regexp` для маскирования паролей, токенов и ключей
+---
 
-**Ничего не собирает, ничего не отсылает**
+# Основные принципы
 
-- Нет `net/http`
-- Нет внешних API
-- Нет телеметрии
-- Нет auto-update
-- Нет curl/wget/nc
+## Read-only
 
-**Не вносит изменений — только анализ**
+InfraDoctor **никогда не изменяет систему**.
 
-- Read-only: никакие конфиги не меняются
-- Сервисы не перезапускаются
-- Пакеты не устанавливаются
-- Firewall не трогается
+Он не:
 
-**Выдает отчет + рекомендации**
+- изменяет конфигурационные файлы;
+- перезапускает службы;
+- устанавливает пакеты;
+- изменяет правила Firewall;
+- включает или отключает сервисы.
 
-- `report.md` — читаемый Markdown с статусами и рекомендациями
-- `report.json` — машиночитаемый JSON для обработки
-- `exposure_summary` — сводка экспозиции в обоих форматах
-- Каждый чек и рекомендация имеют `code` для стабильного маппинга
-- Каждый модуль содержит секции (Configuration, Service, Security)
-- Рекомендации: "PermitRootLogin should be 'no'"
+Только анализ.
 
-**Структура проекта**
+---
+
+## Конфиденциальность
+
+Все данные остаются на сервере.
+
+В проекте отсутствуют:
+
+- телеметрия;
+- аналитика;
+- HTTP-клиент;
+- внешние API;
+- автообновление;
+- фоновый сервис;
+- отправка отчетов.
+
+Даже при наличии доступа в Интернет программа не выполняет никаких сетевых соединений.
+
+---
+
+## Предсказуемость
+
+Используется только стандартная библиотека Go.
+
+Источники информации:
+
+- `/proc`
+- `/sys`
+- `/etc`
+- штатные утилиты Linux через `os/exec`
+
+Никаких сторонних библиотек и скрытых зависимостей.
+
+---
+
+# Использование
+
+```bash
+sudo infradoctor doctor
+```
+
+Последовательность работы:
+
+1. Проверка прав root.
+2. Определение ОС, ядра и окружения.
+3. Поиск установленных компонентов.
+4. Выбор модулей (`all` или отдельные).
+5. Выполнение диагностики.
+6. Маскирование секретов.
+7. Генерация отчетов.
+
+---
+
+# Что проверяется
+
+Каждый модуль анализирует три группы параметров:
+
+- Configuration
+- Service
+- Security
+
+Например, модуль SSH проверяет:
+
+- настройки `sshd_config`;
+- способ аутентификации;
+- разрешение входа для root;
+- используемые порты;
+- состояние службы;
+- открытые сокеты;
+- рекомендации по усилению безопасности.
+
+---
+
+# Отчеты
+
+После завершения диагностики создаются два файла.
+
+## report.md
+
+Человекочитаемый Markdown-отчет.
+
+Содержит:
+
+- результаты проверок;
+- найденные проблемы;
+- рекомендации;
+- сводку уровня экспозиции (Exposure Summary).
+
+---
+
+## report.json
+
+Машиночитаемый отчет для:
+
+- автоматизации;
+- CI/CD;
+- локальных LLM;
+- последующей обработки другими инструментами.
+
+---
+
+Каждая проверка имеет постоянный идентификатор (`code`).
+
+Пример:
 
 ```
+SSH-001
+Status: Warning
+
+PermitRootLogin should be "no"
+```
+
+Стабильные идентификаторы позволяют надежно сопоставлять проверки, рекомендации и автоматические исправления между версиями программы.
+
+---
+
+# Безопасность отчетов
+
+Перед сохранением отчетов автоматически маскируются:
+
+- пароли;
+- приватные ключи;
+- API-токены;
+- секреты приложений;
+- строки авторизации.
+
+В отчетах не сохраняются чувствительные данные.
+
+---
+
+# Что использует InfraDoctor
+
+- Go 1.22
+- только стандартную библиотеку Go;
+- чтение системных файлов;
+- `os/exec` для запуска штатных утилит Linux;
+- `regexp` для маскирования секретов.
+
+Используются только стандартные средства операционной системы.
+
+---
+
+# Что InfraDoctor не использует
+
+В проекте отсутствуют:
+
+- `net/http`
+- внешние API;
+- телеметрия;
+- аналитика;
+- автообновления;
+- `curl`;
+- `wget`;
+- `nc`;
+- агенты;
+- демоны;
+- фоновые процессы.
+
+---
+
+# Архитектура проекта
+
+```
+# Структура проекта
+
+```text
 infradoctor/
-├── cmd/infradoctor/main.go
+├── cmd/
+│   └── infradoctor/
+│       └── main.go              # точка входа CLI
+│
 ├── internal/
-│   ├── core/
-│   ├── detect/
-│   ├── ui/
-│   ├── report/
-│   │   ├── json.go
-│   │   ├── markdown.go
-│   │   ├── summary.go          # Exposure Summary
-│   │   ├── sanitize.go
+│   ├── core/                    # запуск диагностики, общий workflow
+│   ├── detect/                  # определение ОС, окружения, компонентов
+│   ├── ui/                      # интерактивный выбор модулей
+│   │
+│   ├── report/                  # генерация и очистка отчетов
+│   │   ├── markdown.go          # report.md
+│   │   ├── json.go              # report.json
+│   │   ├── summary.go           # Exposure Summary
+│   │   ├── sanitize.go          # маскирование секретов
 │   │   └── sanitize_test.go
-│   └── modules/
-│       ├── interface.go
-│       ├── registry.go
-│       ├── helpers.go
-│       ├── ssh.go
-│       ├── firewall.go
-│       ├── networking.go
-│       ├── docker.go
-│       ├── storage.go
-│       ├── systemd.go
-│       ├── security.go
-│       └── nginx.go
-├── testdata/
-├── reports/examples/
+│   │
+│   └── modules/                 # диагностические модули
+│       ├── interface.go         # общий интерфейс модуля
+│       ├── registry.go          # регистрация доступных модулей
+│       ├── helpers.go           # общие функции модулей
+│       ├── ssh.go               # SSH
+│       ├── firewall.go          # Firewall
+│       ├── networking.go        # сеть, порты, маршруты, DNS
+│       ├── docker.go            # Docker
+│       ├── nginx.go             # Nginx на хосте и в контейнерах
+│       ├── storage.go           # диски, inode, точки монтирования
+│       ├── systemd.go           # failed units, timers, sockets
+│       └── security.go          # базовая проверка безопасности
+│
+├── testdata/                    # тестовые конфиги и фикстуры
+├── reports/
+│   └── examples/                # примеры готовых отчетов
+│
 ├── go.mod
 ├── README.md
 ├── TODO.md
 └── LICENSE
 ```
 
-**Дорожная карта**
-
-- [x] v0.1 — CLI, root, OS, menu, reports, sanitize
-- [x] v0.2 — SSH Module
-- [x] v0.3 — Firewall Module (effective stack, DOCKER-USER)
-- [x] v0.4 — Networking Module (listening ports, routing, DNS)
-- [x] v0.5 — Docker Module (containers, networks, storage)
-- [x] v0.6 — Storage Module (df, inodes, disk analysis)
-- [x] v0.7 — Systemd Module (failed units, timers, sockets)
-- [x] v0.8 — Security Baseline Module (sudo, updates, fail2ban, kernel)
-- [x] Nginx Module (host + container)
-- [x] Exposure Summary (Markdown + JSON)
-- [x] Code-based check/recommendation matching
-
-
-
+Каждый диагностический модуль независим и реализует единый интерфейс, что позволяет легко расширять функциональность проекта.
 ---
 
-## English
+# Дорожная карта
 
-**Purpose**
+| Версия | Возможности |
+|---------|-------------|
+| v0.1 | CLI, определение окружения, отчеты, маскирование секретов |
+| v0.2 | SSH |
+| v0.3 | Firewall |
+| v0.4 | Networking |
+| v0.5 | Docker |
+| v0.6 | Storage |
+| v0.7 | Systemd |
+| v0.8 | Security Baseline |
+| далее | Nginx, Exposure Summary, новые модули |
+---
 
-Single-command Linux server diagnostics. Check SSH, web server, Docker,
-network, firewall — no agents, no data egress.
+# Цели проекта
 
-**How it works**
-
-1. `sudo infradoctor doctor`
-2. Root check
-3. OS, kernel, hostname detection
-4. Component discovery
-5. Interactive selection: `1,3,5` or `all`
-6. Read-only diagnostics per component
-7. Secret masking
-8. `report.md` + `report.json`
-
-**What it uses**
-
-- Go 1.22, stdlib only
-- File reads (`/etc/os-release`, configs, `/proc/`)
-- `os/exec` for system commands
-- `regexp` for secret masking
-
-**Privacy**
-
-No network. No telemetry. No API calls. Nothing leaves the machine.
-
-**Safety**
-
-Read-only. No config changes. No service restarts. No package installs.
-
-**Output**
-
-- `report.md` — human-readable with statuses and recommendations
-- `report.json` — machine-readable for automation
-- `exposure_summary` section in both formats
-- Each check and recommendation has a stable `code` field
-- Each module has sections (Configuration, Service, Security, ...)
-- Recommendations: "PermitRootLogin should be 'no'"
-
-**Project structure**
-
-```
-infradoctor/
-├── cmd/infradoctor/main.go
-├── internal/
-│   ├── core/
-│   ├── detect/
-│   ├── ui/
-│   ├── report/
-│   │   ├── json.go
-│   │   ├── markdown.go
-│   │   ├── summary.go
-│   │   ├── sanitize.go
-│   │   └── sanitize_test.go
-│   └── modules/
-│       ├── interface.go
-│       ├── registry.go
-│       ├── helpers.go
-│       ├── ssh.go
-│       ├── firewall.go
-│       ├── networking.go
-│       ├── docker.go
-│       ├── storage.go
-│       ├── systemd.go
-│       ├── security.go
-│       └── nginx.go
-├── testdata/
-├── reports/examples/
-├── go.mod
-├── README.md
-├── TODO.md
-└── LICENSE
-```
-
-**Roadmap**
-
-- [x] v0.1 — CLI, root, OS, menu, reports, sanitize
-- [x] v0.2 — SSH Module
-- [x] v0.3 — Firewall Module (effective stack, DOCKER-USER)
-- [x] v0.4 — Networking Module (listening ports, routing, DNS)
-- [x] v0.5 — Docker Module (containers, networks, storage)
-- [x] v0.6 — Storage Module (df, inodes, disk analysis)
-- [x] v0.7 — Systemd Module (failed units, timers, sockets)
-- [x] v0.8 — Security Baseline Module (sudo, updates, fail2ban, kernel)
-- [x] Nginx Module (host + container)
-- [x] Exposure Summary (Markdown + JSON)
-- [x] Code-based check/recommendation matching
-
+- диагностика одной командой;
+- отсутствие изменений в системе;
+- отсутствие передачи данных;
+- воспроизводимые результаты;
+- стабильный формат отчетов;
+- удобная обработка человеком и LLM;
+- простая интеграция в существующие процессы администрирования.
 ---
 
 ## License
