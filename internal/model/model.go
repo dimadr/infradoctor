@@ -59,11 +59,11 @@ type Check struct {
 
 // ExposureSummary provides a cross-module overview of system exposure.
 type ExposureSummary struct {
-	PublicPorts      int              `json:"public_ports,omitempty"`
-	RiskyServices    []string         `json:"risky_services,omitempty"`
-	DockerExposed    int              `json:"docker_exposed,omitempty"`
-	StoragePressure  string           `json:"storage_pressure,omitempty"`
-	SystemState      string           `json:"system_state,omitempty"`
-	RebootRequired   bool             `json:"reboot_required"`
+	PublicPorts        int              `json:"public_ports,omitempty"`
+	RiskyServices      []string         `json:"risky_services,omitempty"`
+	DockerExposed      int              `json:"docker_exposed,omitempty"`
+	StoragePressure    string           `json:"storage_pressure,omitempty"`
+	SystemState        string           `json:"system_state,omitempty"`
+	RebootRequired     bool             `json:"reboot_required"`
 	TopRecommendations []Recommendation `json:"top_recommendations,omitempty"`
 }

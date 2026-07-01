@@ -25,53 +25,62 @@ func (m *NetworkingModule) Diagnose(ctx context.Context) model.Result {
 	sections = append(sections, diagnoseRouting(ctx))
 	sections = append(sections, diagnoseDNS(ctx))
 
-	// Manual recommendations for risky public services
+	// Manual recommendations for risky public services (deduplicated by service+port)
 	var recs []model.Recommendation
-	var riskyServices []struct {
-		svc  string
-		port string
-		addr string
-	}
+	type riskyKey struct{ svc, port string }
+	riskySeen := map[riskyKey]struct{ hasIPv4, hasIPv6 bool }{}
 	for _, sec := range sections {
 		if sec.Name == "Listening Ports" {
 			for _, c := range sec.Checks {
-				if strings.Contains(c.Message, "risky service") {
-					msg := c.Message
-					var svc, port, addr string
-					if _, after, ok := strings.Cut(msg, " — risky service ("); ok {
-						if end := strings.LastIndex(after, ")"); end > 0 {
-							svc = after[:end]
-						}
-					}
-					fields := strings.Fields(msg)
-					for i, f := range fields {
-						if f == "port" && i+1 < len(fields) {
-							port = fields[i+1]
-						}
-						if f == "on" && i+1 < len(fields) && addr == "" {
-							addr = fields[i+1]
-						}
-					}
-					if svc != "" {
-						riskyServices = append(riskyServices, struct {
-							svc  string
-							port string
-							addr string
-						}{svc, port, addr})
+				if !strings.Contains(c.Message, "risky service") {
+					continue
+				}
+				msg := c.Message
+				var svc, port, addr string
+				if _, after, ok := strings.Cut(msg, " — risky service ("); ok {
+					if end := strings.LastIndex(after, ")"); end > 0 {
+						svc = after[:end]
 					}
 				}
+				fields := strings.Fields(msg)
+				for i, f := range fields {
+					if f == "port" && i+1 < len(fields) {
+						port = fields[i+1]
+					}
+					if f == "on" && i+1 < len(fields) && addr == "" {
+						addr = fields[i+1]
+					}
+				}
+				if svc == "" {
+					continue
+				}
+				k := riskyKey{svc, port}
+				e := riskySeen[k]
+				if addr == "0.0.0.0" || addr == "[::]" {
+					e.hasIPv4 = e.hasIPv4 || addr == "0.0.0.0"
+					e.hasIPv6 = e.hasIPv6 || addr == "[::]"
+				} else {
+					e.hasIPv4 = true
+				}
+				riskySeen[k] = e
 			}
 		}
 	}
-	for _, rs := range riskyServices {
+	for k, v := range riskySeen {
+		ips := "IPv4"
+		if v.hasIPv4 && v.hasIPv6 {
+			ips = "IPv4 + IPv6"
+		} else if v.hasIPv6 {
+			ips = "IPv6"
+		}
 		recs = append(recs, buildRecommendation(
 			"networking.risky_service",
 			model.StatusWarning,
-			fmt.Sprintf("%s exposed on all interfaces (port %s)", rs.svc, rs.port),
-			fmt.Sprintf("%s is listening on %s port %s, accessible from any network interface", rs.svc, rs.addr, rs.port),
-			fmt.Sprintf("Unauthorized access to %s if not properly authenticated", rs.svc),
-			fmt.Sprintf("Bind %s to localhost only, or restrict with firewall rules", rs.svc),
-			fmt.Sprintf("ss -tulpn | grep ':%s '", rs.port),
+			fmt.Sprintf("%s exposed on all interfaces (port %s)", k.svc, k.port),
+			fmt.Sprintf("%s is exposed on %s port %s, accessible from any network interface", k.svc, ips, k.port),
+			fmt.Sprintf("Unauthorized access to %s if not properly authenticated", k.svc),
+			fmt.Sprintf("Bind %s to localhost only, or restrict with firewall rules", k.svc),
+			fmt.Sprintf("ss -tulpn | grep ':%s '", k.port),
 			false,
 		))
 	}

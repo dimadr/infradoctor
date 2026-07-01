@@ -85,7 +85,7 @@ func (m *SSHModule) Diagnose(ctx context.Context) model.Result {
 			"Any user with an empty password can log in via SSH — immediate risk",
 			"Set PermitEmptyPasswords to 'no' immediately",
 			"sed -i 's/^PermitEmptyPasswords yes/PermitEmptyPasswords no/' /etc/ssh/sshd_config && systemctl reload sshd",
-			true,
+			false,
 		))
 	}
 	if hasDSAKey {
@@ -103,7 +103,7 @@ func (m *SSHModule) Diagnose(ctx context.Context) model.Result {
 			"Increases attack surface — X11 forwarding can be abused to capture keystrokes or screen content",
 			"Disable X11 forwarding if not required",
 			"sed -i 's/^X11Forwarding yes/X11Forwarding no/' /etc/ssh/sshd_config && systemctl reload sshd",
-			true,
+			false,
 		))
 	}
 	if hasGatewayPorts {
@@ -112,7 +112,7 @@ func (m *SSHModule) Diagnose(ctx context.Context) model.Result {
 			"SSH port forwarding becomes accessible from other hosts, increasing exposure",
 			"Disable GatewayPorts if remote forwarding is not needed",
 			"sed -i 's/^GatewayPorts yes/GatewayPorts no/' /etc/ssh/sshd_config && systemctl reload sshd",
-			true,
+			false,
 		))
 	}
 	// Codes that identify checks covered by manual recommendations

@@ -8,6 +8,30 @@ import (
 	"github.com/dimadr/infradoctor/internal/model"
 )
 
+var riskPriority = map[string]int{
+	"networking.risky_service":      0,
+	"docker.exposed_critical":       1,
+	"firewall.docker_empty_chain":   2,
+	"firewall.docker_missing_chain": 2,
+	"firewall.ufw_inactive":         2,
+	"firewall.ufw_no_ssh":           2,
+	"storage.root_high":             3,
+	"security.reboot_required":      4,
+	"ssh.permit_root_login":         5,
+	"ssh.password_auth":             5,
+	"ssh.empty_passwords":           5,
+	"ssh.dsa_key":                   5,
+	"ssh.x11_forwarding":            5,
+	"ssh.gateway_ports":             5,
+}
+
+func recPriority(rec model.Recommendation) int {
+	if p, ok := riskPriority[rec.Code]; ok {
+		return p
+	}
+	return 999
+}
+
 // BuildExposureSummary extracts cross-module exposure data from results.
 func BuildExposureSummary(results []model.Result) model.ExposureSummary {
 	var s model.ExposureSummary
@@ -34,15 +58,23 @@ func BuildExposureSummary(results []model.Result) model.ExposureSummary {
 				}
 			}
 		case "docker":
+			uniqueContainers := map[string]bool{}
 			for _, sec := range r.Sections {
 				if sec.Name == "Containers" {
 					for _, c := range sec.Checks {
 						if c.Code == "docker.exposed_critical" {
-							s.DockerExposed++
+							msg := c.Message
+							if start := strings.Index(msg, "("); start != -1 {
+								before := strings.TrimSpace(msg[:start])
+								if fields := strings.Fields(before); len(fields) >= 2 {
+									uniqueContainers[fields[1]] = true
+								}
+							}
 						}
 					}
 				}
 			}
+			s.DockerExposed = len(uniqueContainers)
 		case "storage":
 			for _, sec := range r.Sections {
 				if sec.Name == "Filesystems" {
@@ -86,12 +118,17 @@ func BuildExposureSummary(results []model.Result) model.ExposureSummary {
 		model.StatusInfo:     2,
 	}
 	sort.SliceStable(allRecs, func(i, j int) bool {
+		pi := recPriority(allRecs[i])
+		pj := recPriority(allRecs[j])
+		if pi != pj {
+			return pi < pj
+		}
 		si := severityOrder[allRecs[i].Severity]
 		sj := severityOrder[allRecs[j].Severity]
 		if si != sj {
 			return si < sj
 		}
-		return len(allRecs[i].Impact) < len(allRecs[j].Impact)
+		return allRecs[i].Code < allRecs[j].Code
 	})
 	n := 3
 	if len(allRecs) < n {

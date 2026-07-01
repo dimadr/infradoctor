@@ -160,10 +160,10 @@ func diagnoseDockerContainers(ctx context.Context) (model.Section, []model.Recom
 					Status:  model.StatusWarning,
 					Message: fmt.Sprintf("%d container(s) use host network mode (bypasses Docker NAT)", hostNetCount),
 				})
-			recs = append(recs, buildRecommendation(
-				"docker.host_network",
-				model.StatusWarning,
-				"Container(s) use host network mode",
+				recs = append(recs, buildRecommendation(
+					"docker.host_network",
+					model.StatusWarning,
+					"Container(s) use host network mode",
 					fmt.Sprintf("%d container(s) share the host network namespace, bypassing Docker NAT and port mapping", hostNetCount),
 					"Containers have full access to host networking; published ports are not isolated by Docker",
 					"Use bridge network mode with explicit port mappings instead of host mode",
