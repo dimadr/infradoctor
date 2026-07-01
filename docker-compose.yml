@@ -1,0 +1,18 @@
+version: "3.9"
+services:
+  infradoctor:
+    build: .
+    network_mode: "host"
+    pid: "host"
+    privileged: true
+    volumes:
+      - /etc:/etc:ro
+      - /proc:/proc:ro
+      - /var:/var:ro
+      - /run:/run:ro
+    healthcheck:
+      test: ["CMD", "/infradoctor", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
