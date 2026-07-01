@@ -208,7 +208,6 @@ PermitRootLogin should be "no"
 ```
 # Структура проекта
 
-```text
 infradoctor/
 ├── cmd/
 │   └── infradoctor/
