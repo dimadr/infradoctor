@@ -30,7 +30,7 @@ func (m *DockerModule) Diagnose(ctx context.Context) model.Result {
 
 	// Flat recs for uncovered warnings/criticals
 	skipPatterns := map[string][]string{
-		"Containers": {"docker.exposed_critical", "docker.privileged", "docker.host_network"},
+		"Containers": {"docker.exposed_critical", "docker.exposed_summary", "docker.privileged", "docker.host_network"},
 	}
 	recs = append(recs, addFlatRecsFromSections(sections, skipPatterns)...)
 
@@ -204,7 +204,7 @@ func diagnoseDockerContainers(ctx context.Context) (model.Section, []model.Recom
 
 	if exposedRisky > 0 {
 		checks = append(checks, model.Check{
-			Code:    "docker.exposed_critical",
+			Code:    "docker.exposed_summary",
 			Status:  model.StatusWarning,
 			Message: fmt.Sprintf("%d container(s) expose risky services (DB/Redis) on all interfaces", exposedRisky),
 		})

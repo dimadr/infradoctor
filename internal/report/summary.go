@@ -32,6 +32,22 @@ func recPriority(rec model.Recommendation) int {
 	return 999
 }
 
+func extractRiskyService(msg string) (svc, port string) {
+	if _, after, ok := strings.Cut(msg, " — risky service ("); ok {
+		if end := strings.LastIndex(after, ")"); end > 0 {
+			svc = after[:end]
+		}
+	}
+	fields := strings.Fields(msg)
+	for i, f := range fields {
+		if f == "port" && i+1 < len(fields) {
+			port = strings.TrimRight(fields[i+1], ",;")
+			break
+		}
+	}
+	return
+}
+
 // BuildExposureSummary extracts cross-module exposure data from results.
 func BuildExposureSummary(results []model.Result) model.ExposureSummary {
 	var s model.ExposureSummary
@@ -39,11 +55,17 @@ func BuildExposureSummary(results []model.Result) model.ExposureSummary {
 	for _, r := range results {
 		switch r.ID {
 		case "networking":
+			riskySeen := map[string]bool{}
 			for _, sec := range r.Sections {
 				if sec.Name == "Listening Ports" {
 					for _, c := range sec.Checks {
 						if c.Code == "networking.risky_service" {
-							s.RiskyServices = append(s.RiskyServices, c.Message)
+							svc, port := extractRiskyService(c.Message)
+							key := svc + ":" + port
+							if !riskySeen[key] {
+								riskySeen[key] = true
+								s.RiskyServices = append(s.RiskyServices, fmt.Sprintf("%s (port %s)", svc, port))
+							}
 						}
 						if c.Code == "networking.port_count" {
 							n := 0
