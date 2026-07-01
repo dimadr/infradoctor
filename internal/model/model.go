@@ -23,6 +23,7 @@ type OSInfo struct {
 
 // Recommendation is a structured recommendation with context, impact, and action.
 type Recommendation struct {
+	Code     string `json:"code,omitempty"`
 	Severity Status `json:"severity"`
 	Title    string `json:"title"`
 	Context  string `json:"context,omitempty"`
@@ -51,6 +52,18 @@ type Section struct {
 
 // Check is a single diagnostic observation.
 type Check struct {
+	Code    string `json:"code,omitempty"`
 	Status  Status `json:"status"`
 	Message string `json:"message"`
+}
+
+// ExposureSummary provides a cross-module overview of system exposure.
+type ExposureSummary struct {
+	PublicPorts      int              `json:"public_ports,omitempty"`
+	RiskyServices    []string         `json:"risky_services,omitempty"`
+	DockerExposed    int              `json:"docker_exposed,omitempty"`
+	StoragePressure  string           `json:"storage_pressure,omitempty"`
+	SystemState      string           `json:"system_state,omitempty"`
+	RebootRequired   bool             `json:"reboot_required"`
+	TopRecommendations []Recommendation `json:"top_recommendations,omitempty"`
 }

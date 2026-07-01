@@ -17,8 +17,8 @@ import (
 // SSHModule diagnoses SSH server configuration, authentication, keys, and security.
 type SSHModule struct{}
 
-func (m *SSHModule) ID() string      { return "ssh" }
-func (m *SSHModule) Name() string    { return "SSH Module" }
+func (m *SSHModule) ID() string   { return "ssh" }
+func (m *SSHModule) Name() string { return "SSH Module" }
 func (m *SSHModule) Detect() bool {
 	_, err := exec.LookPath("sshd")
 	return err == nil
@@ -34,12 +34,107 @@ func (m *SSHModule) Diagnose(ctx context.Context) model.Result {
 	sections = append(sections, diagnoseSSHPermissions())
 	sections = append(sections, diagnoseSSHSecurity(ctx))
 
+	// Determine which key risks are present
+	hasRootLogin := false
+	hasPasswordAuth := false
+	hasEmptyPasswords := false
+	hasDSAKey := false
+	hasX11Forwarding := false
+	hasGatewayPorts := false
+	for _, sec := range sections {
+		for _, c := range sec.Checks {
+			switch {
+			case strings.Contains(c.Message, "PermitRootLogin: yes"):
+				hasRootLogin = true
+			case strings.Contains(c.Message, "PasswordAuthentication: yes"):
+				hasPasswordAuth = true
+			case strings.Contains(c.Message, "PermitEmptyPasswords: yes"):
+				hasEmptyPasswords = true
+			case strings.Contains(c.Message, "DSA host key present"):
+				hasDSAKey = true
+			case strings.Contains(c.Message, "X11Forwarding: yes"):
+				hasX11Forwarding = true
+			case strings.Contains(c.Message, "GatewayPorts: yes"):
+				hasGatewayPorts = true
+			}
+		}
+	}
+	// Build manual recs for found risks only
+	var recs []model.Recommendation
+	if hasRootLogin {
+		recs = append(recs, buildRecommendation("ssh.permit_root_login", model.StatusWarning, "Root SSH login allowed with password",
+			"PermitRootLogin is set to 'yes', allowing direct root login with password",
+			"Attackers can brute-force root password directly via SSH",
+			"Change PermitRootLogin to 'prohibit-password' to require key-based auth for root",
+			"sed -i 's/^PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && systemctl reload sshd",
+			false,
+		))
+	}
+	if hasPasswordAuth {
+		recs = append(recs, buildRecommendation("ssh.password_auth", model.StatusWarning, "SSH password authentication enabled",
+			"PasswordAuthentication is enabled, allowing password-based logins",
+			"Increases risk of brute-force attacks against SSH",
+			"Disable password auth and use key-based authentication only",
+			"sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl reload sshd",
+			false,
+		))
+	}
+	if hasEmptyPasswords {
+		recs = append(recs, buildRecommendation("ssh.empty_passwords", model.StatusCritical, "SSH allows empty password logins",
+			"PermitEmptyPasswords is set to 'yes', allowing login with no password",
+			"Any user with an empty password can log in via SSH — immediate risk",
+			"Set PermitEmptyPasswords to 'no' immediately",
+			"sed -i 's/^PermitEmptyPasswords yes/PermitEmptyPasswords no/' /etc/ssh/sshd_config && systemctl reload sshd",
+			true,
+		))
+	}
+	if hasDSAKey {
+		recs = append(recs, buildRecommendation("ssh.dsa_key", model.StatusWarning, "DSA host key in use",
+			"DSA host key found — DSA is deprecated and considered weak (limited to 1024 bits)",
+			"SSH connections using DSA host key verification are less secure",
+			"Remove DSA host key and use Ed25519 or ECDSA",
+			"rm /etc/ssh/ssh_host_dsa_key* && ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ''",
+			false,
+		))
+	}
+	if hasX11Forwarding {
+		recs = append(recs, buildRecommendation("ssh.x11_forwarding", model.StatusWarning, "SSH X11 forwarding enabled",
+			"X11Forwarding is enabled, allowing X11 traffic over SSH connections",
+			"Increases attack surface — X11 forwarding can be abused to capture keystrokes or screen content",
+			"Disable X11 forwarding if not required",
+			"sed -i 's/^X11Forwarding yes/X11Forwarding no/' /etc/ssh/sshd_config && systemctl reload sshd",
+			true,
+		))
+	}
+	if hasGatewayPorts {
+		recs = append(recs, buildRecommendation("ssh.gateway_ports", model.StatusWarning, "SSH GatewayPorts enabled",
+			"GatewayPorts allows remote hosts to connect to forwarded ports, not just localhost",
+			"SSH port forwarding becomes accessible from other hosts, increasing exposure",
+			"Disable GatewayPorts if remote forwarding is not needed",
+			"sed -i 's/^GatewayPorts yes/GatewayPorts no/' /etc/ssh/sshd_config && systemctl reload sshd",
+			true,
+		))
+	}
+	// Codes that identify checks covered by manual recommendations
+	skipCodes := []string{
+		"ssh.permit_root_login",
+		"ssh.password_auth",
+		"ssh.empty_passwords",
+		"ssh.dsa_key",
+		"ssh.x11_forwarding",
+		"ssh.gateway_ports",
+	}
+	// Add flat recs for uncovered warnings/criticals
+	for _, sec := range sections {
+		recs = append(recs, addFlatRecs(sec.Checks, skipCodes)...)
+	}
+
 	return model.Result{
 		ID:              m.ID(),
 		Name:            m.Name(),
 		Status:          aggregateStatus(sections),
 		Sections:        sections,
-		Recommendations: collectRecommendations(sections),
+		Recommendations: recs,
 	}
 }
 
@@ -181,67 +276,67 @@ func diagnoseSSHAuth(ctx context.Context) model.Section {
 	val := config["permitrootlogin"]
 	switch val {
 	case "yes":
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "PermitRootLogin: yes (consider 'prohibit-password' or 'no')"})
+		checks = append(checks, model.Check{Code: "ssh.permit_root_login", Status: model.StatusWarning, Message: "PermitRootLogin: yes (consider 'prohibit-password' or 'no')"})
 	case "prohibit-password", "without-password":
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "PermitRootLogin: " + val})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "PermitRootLogin: " + val})
 	case "no":
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "PermitRootLogin: no"})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "PermitRootLogin: no"})
 	default:
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "PermitRootLogin: " + val})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "PermitRootLogin: " + val})
 	}
 
 	val = config["passwordauthentication"]
 	switch val {
 	case "yes":
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "PasswordAuthentication: yes (consider key-based auth)"})
+		checks = append(checks, model.Check{Code: "ssh.password_auth", Status: model.StatusWarning, Message: "PasswordAuthentication: yes (consider key-based auth)"})
 	case "no":
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "PasswordAuthentication: no"})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "PasswordAuthentication: no"})
 	default:
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "PasswordAuthentication: " + val})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "PasswordAuthentication: " + val})
 	}
 
 	val = config["pubkeyauthentication"]
 	switch val {
 	case "yes":
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "PubkeyAuthentication: yes"})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "PubkeyAuthentication: yes"})
 	case "no":
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "PubkeyAuthentication: no (public key auth disabled)"})
+		checks = append(checks, model.Check{Status: model.StatusWarning, Message: "PubkeyAuthentication: no (public key auth disabled)"})
 	default:
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "PubkeyAuthentication: " + val})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "PubkeyAuthentication: " + val})
 	}
 
 	val = config["kbdinteractiveauthentication"]
 	if val == "yes" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "KbdInteractiveAuthentication: yes"})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "KbdInteractiveAuthentication: yes"})
 	}
 
 	val = config["challengeresponseauthentication"]
 	if val == "yes" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "ChallengeResponseAuthentication: yes"})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "ChallengeResponseAuthentication: yes"})
 	}
 
 	if v := config["allowusers"]; v != "" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "AllowUsers: " + v})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "AllowUsers: " + v})
 	}
 	if v := config["allowgroups"]; v != "" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "AllowGroups: " + v})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "AllowGroups: " + v})
 	}
 	if v := config["denyusers"]; v != "" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "DenyUsers: " + v})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "DenyUsers: " + v})
 	}
 	if v := config["denygroups"]; v != "" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "DenyGroups: " + v})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "DenyGroups: " + v})
 	}
 
 	val = config["permitemptypasswords"]
 	if val == "yes" {
-		checks = append(checks, model.Check{	Status: model.StatusCritical, Message: "PermitEmptyPasswords: yes (allows empty password logins)"})
+		checks = append(checks, model.Check{Code: "ssh.empty_passwords", Status: model.StatusCritical, Message: "PermitEmptyPasswords: yes (allows empty password logins)"})
 	} else if val == "no" {
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "PermitEmptyPasswords: no"})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "PermitEmptyPasswords: no"})
 	}
 
 	if v := config["authenticationmethods"]; v != "" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "AuthenticationMethods: " + v})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "AuthenticationMethods: " + v})
 	}
 
 	return model.Section{
@@ -257,7 +352,7 @@ func diagnoseSSHKeys() model.Section {
 	authKeys := filepath.Join(homeDir(), ".ssh", "authorized_keys")
 	data, err := os.ReadFile(authKeys)
 	if err != nil {
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "No authorized_keys found — key-based auth may not work"})
+		checks = append(checks, model.Check{Status: model.StatusWarning, Message: "No authorized_keys found — key-based auth may not work"})
 	} else {
 		count := 0
 		for _, line := range strings.Split(string(data), "\n") {
@@ -270,15 +365,15 @@ func diagnoseSSHKeys() model.Section {
 			}
 		}
 		if count == 0 {
-			checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "authorized_keys exists but contains no valid keys"})
+			checks = append(checks, model.Check{Status: model.StatusWarning, Message: "authorized_keys exists but contains no valid keys"})
 		} else {
-			checks = append(checks, model.Check{	Status: model.StatusOK, Message: fmt.Sprintf("authorized_keys: %d key(s) configured", count)})
+			checks = append(checks, model.Check{Status: model.StatusOK, Message: fmt.Sprintf("authorized_keys: %d key(s) configured", count)})
 		}
 	}
 
 	hostKeyDir := "/etc/ssh"
-	hostKeyTypes := []struct{
-		file   string
+	hostKeyTypes := []struct {
+		file    string
 		keyType string
 	}{
 		{"ssh_host_rsa_key", "RSA"},
@@ -295,7 +390,7 @@ func diagnoseSSHKeys() model.Section {
 		if info, err := os.Stat(privPath); err == nil {
 			perm := info.Mode().Perm()
 			if perm&0077 != 0 {
-				checks = append(checks, model.Check{	Status: model.StatusWarning, Message: fmt.Sprintf("%s: permissions %04o (should be 0600)", hk.file, perm)})
+				checks = append(checks, model.Check{Status: model.StatusWarning, Message: fmt.Sprintf("%s: permissions %04o (should be 0600)", hk.file, perm)})
 			}
 			if hk.keyType == "DSA" {
 				hasDSA = true
@@ -305,11 +400,11 @@ func diagnoseSSHKeys() model.Section {
 	}
 
 	if hasDSA {
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "DSA host key present — DSA is deprecated and considered weak"})
+		checks = append(checks, model.Check{Code: "ssh.dsa_key", Status: model.StatusWarning, Message: "DSA host key present — DSA is deprecated and considered weak"})
 	}
 
 	if len(found) > 0 {
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: fmt.Sprintf("Host keys: %s", strings.Join(found, ", "))})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: fmt.Sprintf("Host keys: %s", strings.Join(found, ", "))})
 	}
 
 	return model.Section{
@@ -325,14 +420,14 @@ func diagnoseSSHPermissions() model.Section {
 	sshDir := filepath.Join(homeDir(), ".ssh")
 	info, err := os.Stat(sshDir)
 	if err != nil {
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: fmt.Sprintf("%s: %v", sshDir, err)})
-		return model.Section{Name: "Permissions", 	Status: model.StatusWarning, Checks: checks}
+		checks = append(checks, model.Check{Status: model.StatusWarning, Message: fmt.Sprintf("%s: %v", sshDir, err)})
+		return model.Section{Name: "Permissions", Status: model.StatusWarning, Checks: checks}
 	}
 	perm := info.Mode().Perm()
 	if perm&0077 != 0 {
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: fmt.Sprintf("%s: permissions %04o (should be 0700)", sshDir, perm)})
+		checks = append(checks, model.Check{Status: model.StatusWarning, Message: fmt.Sprintf("%s: permissions %04o (should be 0700)", sshDir, perm)})
 	} else {
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: fmt.Sprintf("%s: permissions %04o", sshDir, perm)})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: fmt.Sprintf("%s: permissions %04o", sshDir, perm)})
 	}
 
 	authKeys := filepath.Join(sshDir, "authorized_keys")
@@ -340,9 +435,9 @@ func diagnoseSSHPermissions() model.Section {
 	if err == nil {
 		perm = info.Mode().Perm()
 		if perm&0077 != 0 || perm&0044 != 0 {
-			checks = append(checks, model.Check{	Status: model.StatusWarning, Message: fmt.Sprintf("%s: permissions %04o (should be 0600)", authKeys, perm)})
+			checks = append(checks, model.Check{Status: model.StatusWarning, Message: fmt.Sprintf("%s: permissions %04o (should be 0600)", authKeys, perm)})
 		} else {
-			checks = append(checks, model.Check{	Status: model.StatusOK, Message: fmt.Sprintf("%s: permissions %04o", authKeys, perm)})
+			checks = append(checks, model.Check{Status: model.StatusOK, Message: fmt.Sprintf("%s: permissions %04o", authKeys, perm)})
 		}
 	}
 
@@ -370,54 +465,54 @@ func diagnoseSSHSecurity(ctx context.Context) model.Section {
 
 	if v := config["protocol"]; v != "" {
 		if v == "1" {
-			checks = append(checks, model.Check{	Status: model.StatusCritical, Message: "Protocol: 1 (insecure, use Protocol 2)"})
+			checks = append(checks, model.Check{Status: model.StatusCritical, Message: "Protocol: 1 (insecure, use Protocol 2)"})
 		} else {
-			checks = append(checks, model.Check{	Status: model.StatusOK, Message: "Protocol: " + v})
+			checks = append(checks, model.Check{Status: model.StatusOK, Message: "Protocol: " + v})
 		}
 	}
 
 	if v := config["loglevel"]; v != "" {
 		if v == "INFO" || v == "VERBOSE" {
-			checks = append(checks, model.Check{	Status: model.StatusOK, Message: "LogLevel: " + v})
+			checks = append(checks, model.Check{Status: model.StatusOK, Message: "LogLevel: " + v})
 		} else {
-			checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "LogLevel: " + v})
+			checks = append(checks, model.Check{Status: model.StatusInfo, Message: "LogLevel: " + v})
 		}
 	}
 
 	if v := config["maxauthtries"]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n <= 3 {
-			checks = append(checks, model.Check{	Status: model.StatusOK, Message: "MaxAuthTries: " + v})
+			checks = append(checks, model.Check{Status: model.StatusOK, Message: "MaxAuthTries: " + v})
 		} else {
-			checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "MaxAuthTries: " + v + " (consider ≤ 3)"})
+			checks = append(checks, model.Check{Status: model.StatusWarning, Message: "MaxAuthTries: " + v + " (consider ≤ 3)"})
 		}
 	}
 
 	if v := config["clientaliveinterval"]; v != "" && v != "0" {
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "ClientAliveInterval: " + v})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "ClientAliveInterval: " + v})
 	}
 
 	if v := config["usepam"]; v == "yes" {
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "UsePAM: yes"})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "UsePAM: yes"})
 	}
 
 	if v := config["x11forwarding"]; v == "yes" {
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "X11Forwarding: yes (disable unless needed)"})
+		checks = append(checks, model.Check{Code: "ssh.x11_forwarding", Status: model.StatusWarning, Message: "X11Forwarding: yes (disable unless needed)"})
 	}
 
 	if v := config["allowtcpforwarding"]; v == "no" {
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "AllowTcpForwarding: no"})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "AllowTcpForwarding: no"})
 	}
 
 	if v := config["gatewayports"]; v == "yes" {
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "GatewayPorts: yes (allows remote hosts to connect to forwarded ports)"})
+		checks = append(checks, model.Check{Code: "ssh.gateway_ports", Status: model.StatusWarning, Message: "GatewayPorts: yes (allows remote hosts to connect to forwarded ports)"})
 	}
 
 	if v := config["permittunnel"]; v != "" && v != "no" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "PermitTunnel: " + v})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "PermitTunnel: " + v})
 	}
 
 	if v := config["permituserenvironment"]; v == "yes" {
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "PermitUserEnvironment: yes (may allow environment variable injection via ~/.ssh/environment)"})
+		checks = append(checks, model.Check{Status: model.StatusWarning, Message: "PermitUserEnvironment: yes (may allow environment variable injection via ~/.ssh/environment)"})
 	}
 
 	return model.Section{

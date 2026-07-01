@@ -26,12 +26,55 @@ func (m *SecurityModule) Diagnose(ctx context.Context) model.Result {
 	sections = append(sections, diagnoseServices(ctx))
 	sections = append(sections, diagnoseKernel(ctx))
 
+	// Manual recommendations for key security risks
+	var recs []model.Recommendation
+	hasReboot := false
+	hasUID0 := false
+	for _, sec := range sections {
+		for _, c := range sec.Checks {
+			switch {
+			case strings.Contains(c.Message, "System reboot required"):
+				hasReboot = true
+			case strings.Contains(c.Message, "Non-root user with UID 0"):
+				hasUID0 = true
+			}
+		}
+	}
+	if hasReboot {
+		recs = append(recs, buildRecommendation(
+			"security.reboot_required",
+			model.StatusWarning, "System reboot required — pending kernel update",
+			"A kernel update has been installed but the system has not been rebooted. The running kernel may have unpatched vulnerabilities.",
+			"System is running an older kernel with potentially unpatched vulnerabilities",
+			"Schedule a maintenance window and reboot the server",
+			"reboot",
+			false,
+		))
+	}
+	if hasUID0 {
+		recs = append(recs, buildRecommendation(
+			"security.non_root_uid0",
+			model.StatusWarning, "Non-root user has UID 0 (root privileges)",
+			"Users other than root with UID 0 have full root privileges and may be backdoor accounts",
+			"Unauthorized users gain unrestricted root access with standard user credentials",
+			"Investigate non-root UID 0 users and remove or reassign UID",
+			"awk -F: '($3 == 0) { print $1 }' /etc/passwd",
+			false,
+		))
+	}
+	// Flat recs for uncovered warnings (e.g., world-writable dirs)
+	skipPatterns := map[string][]string{
+		"Users":  {"security.non_root_uid0"},
+		"Kernel": {"security.reboot_required"},
+	}
+	recs = append(recs, addFlatRecsFromSections(sections, skipPatterns)...)
+
 	return model.Result{
 		ID:              m.ID(),
 		Name:            m.Name(),
 		Status:          aggregateStatus(sections),
 		Sections:        sections,
-		Recommendations: collectRecommendations(sections),
+		Recommendations: recs,
 	}
 }
 
@@ -50,6 +93,7 @@ func diagnoseUsers(ctx context.Context) model.Section {
 		if u != "" {
 			uid0Count++
 			checks = append(checks, model.Check{
+				Code:    "security.non_root_uid0",
 				Status:  model.StatusWarning,
 				Message: fmt.Sprintf("Non-root user with UID 0: %s", u),
 			})
@@ -176,6 +220,7 @@ func diagnoseKernel(ctx context.Context) model.Section {
 		out, _ := runCmd(ctx, "/usr/bin/needs-restarting", "-r")
 		if strings.Contains(out, "reboot is required") || strings.Contains(out, "REBOOT REQUIRED") {
 			checks = append(checks, model.Check{
+				Code:    "security.reboot_required",
 				Status:  model.StatusWarning,
 				Message: "System reboot required — pending kernel update",
 			})
@@ -184,6 +229,7 @@ func diagnoseKernel(ctx context.Context) model.Section {
 		// Alternative: check /var/run/reboot-required
 		if _, err := os.Stat("/var/run/reboot-required"); err == nil {
 			checks = append(checks, model.Check{
+				Code:    "security.reboot_required",
 				Status:  model.StatusWarning,
 				Message: "System reboot required — /var/run/reboot-required exists",
 			})
@@ -206,13 +252,19 @@ func diagnoseKernel(ctx context.Context) model.Section {
 	}
 
 	// Check for world-writable directories outside expected paths
-	out, _ = runCmd(ctx, "find", "/", "-maxdepth", "3", "-type", "d", "-perm", "-o+w", "-not", "-path", "/proc/*", "-not", "-path", "/sys/*", "-not", "-path", "/dev/*", "-not", "-path", "/run/*", "-not", "-path", "/tmp/*", "-not", "-path", "/var/tmp/*", "-not", "-path", "/var/cache/*")
+	out, _ = runCmd(ctx, "find", "/", "-maxdepth", "3", "-xdev", "-type", "d", "-perm", "-o+w", "-not", "-path", "/proc/*", "-not", "-path", "/sys/*", "-not", "-path", "/dev/*", "-not", "-path", "/run/*", "-not", "-path", "/tmp/*", "-not", "-path", "/var/tmp/*", "-not", "-path", "/var/cache/*", "-not", "-path", "/var/lib/docker/*", "-not", "-path", "/snap/*")
 	if out != "" {
 		dirs := strings.Split(strings.TrimSpace(out), "\n")
 		if len(dirs) > 0 && dirs[0] != "" {
+			msg := fmt.Sprintf("World-writable directories found outside /tmp and /var/tmp: %d", len(dirs))
+			if len(dirs) > 5 {
+				msg += fmt.Sprintf(" (sample: %s, ...)", strings.Join(dirs[:5], ", "))
+			} else {
+				msg += fmt.Sprintf(" (%s)", strings.Join(dirs, ", "))
+			}
 			checks = append(checks, model.Check{
 				Status:  model.StatusWarning,
-				Message: fmt.Sprintf("World-writable directories found outside /tmp and /var/tmp: %d", len(dirs)),
+				Message: msg,
 			})
 		}
 	}

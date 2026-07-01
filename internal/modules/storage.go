@@ -23,13 +23,44 @@ func (m *StorageModule) Diagnose(ctx context.Context) model.Result {
 
 	sections = append(sections, diagnoseFilesystems(ctx))
 	sections = append(sections, diagnoseInodes(ctx))
+	sections = append(sections, diagnoseDiskAnalysis(ctx))
+
+	// Manual recommendation for root filesystem pressure
+	var recs []model.Recommendation
+	rootHigh := false
+	for _, sec := range sections {
+		if sec.Name == "Filesystems" {
+			for _, c := range sec.Checks {
+				if strings.Contains(c.Message, "Root filesystem at") && c.Status == model.StatusWarning {
+					rootHigh = true
+				}
+			}
+		}
+	}
+	if rootHigh {
+		recs = append(recs, buildRecommendation(
+			"storage.root_high",
+			model.StatusWarning,
+			"Root filesystem usage above 80%",
+			"The root filesystem is approaching capacity, which can affect system stability",
+			"Database writes may fail, logs may be lost, Docker pulls may stall, cron jobs may fail",
+			"Clean unused packages, remove old Docker images, prune logs, or expand the partition",
+			"docker system prune -af && journalctl --vacuum-size=500M && apt-get autoremove --purge",
+			false,
+		))
+	}
+	// Flat recs for uncovered warnings (e.g., critical filesystem usage on other mounts)
+	skipPatterns := map[string][]string{
+		"Filesystems": {"storage.root_high"},
+	}
+	recs = append(recs, addFlatRecsFromSections(sections, skipPatterns)...)
 
 	return model.Result{
 		ID:              m.ID(),
 		Name:            m.Name(),
 		Status:          aggregateStatus(sections),
 		Sections:        sections,
-		Recommendations: collectRecommendations(sections),
+		Recommendations: recs,
 	}
 }
 
@@ -106,6 +137,7 @@ func diagnoseFilesystems(ctx context.Context) model.Section {
 	for _, e := range entries {
 		if e.mount == "/" && e.usePct >= 80 {
 			checks = append(checks, model.Check{
+				Code:    "storage.root_high",
 				Status:  model.StatusWarning,
 				Message: fmt.Sprintf("Root filesystem at %d%% — high usage may affect database writes, logs, and Docker pulls", e.usePct),
 			})
@@ -169,6 +201,62 @@ func diagnoseInodes(ctx context.Context) model.Section {
 
 	return model.Section{
 		Name:   "Inodes",
+		Status: sectionStatus(checks),
+		Checks: checks,
+	}
+}
+
+func diagnoseDiskAnalysis(ctx context.Context) model.Section {
+	var checks []model.Check
+
+	// Journal disk usage
+	if hasBinary("journalctl") {
+		out, _ := runCmd(ctx, "journalctl", "--disk-usage")
+		if out != "" {
+			checks = append(checks, model.Check{
+				Status:  model.StatusInfo,
+				Message: fmt.Sprintf("Journal: %s", out),
+			})
+		}
+	}
+
+	// Top-level directory sizes (root filesystem, depth 1, excludes virtual mounts)
+	duOut, _ := runCmd(ctx, "du", "-h", "--max-depth=1", "/", "--exclude=/proc", "--exclude=/sys", "--exclude=/dev", "--exclude=/run")
+	if duOut != "" {
+		lines := strings.Split(duOut, "\n")
+		var dirs []string
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasSuffix(line, "\t/") {
+				continue
+			}
+			dirs = append(dirs, line)
+		}
+		if len(dirs) > 5 {
+			dirs = dirs[:5]
+		}
+		if len(dirs) > 0 {
+			checks = append(checks, model.Check{
+				Status:  model.StatusInfo,
+				Message: fmt.Sprintf("Top directories by size: %s", strings.Join(dirs, ", ")),
+			})
+		}
+	}
+
+	// Check /var/lib/docker size if it exists
+	dockerOut, err := runCmd(ctx, "du", "-sh", "/var/lib/docker")
+	if err == nil && dockerOut != "" {
+		fields := strings.Fields(dockerOut)
+		if len(fields) >= 1 {
+			checks = append(checks, model.Check{
+				Status:  model.StatusInfo,
+				Message: fmt.Sprintf("Docker data directory: %s", fields[0]),
+			})
+		}
+	}
+
+	return model.Section{
+		Name:   "Disk Analysis",
 		Status: sectionStatus(checks),
 		Checks: checks,
 	}

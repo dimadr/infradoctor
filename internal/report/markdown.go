@@ -31,6 +31,39 @@ func WriteMD(osInfo model.OSInfo, results []model.Result) (string, error) {
 	fmt.Fprintf(f, "| Kernel | %s |\n", osInfo.Kernel)
 	fmt.Fprintln(f)
 
+	// Exposure Summary — cross-module overview
+	fmt.Fprintln(f, "## Exposure Summary")
+	fmt.Fprintln(f)
+	summary := BuildExposureSummary(results)
+	if summary.PublicPorts > 0 {
+		fmt.Fprintf(f, "- Public ports: %d\n", summary.PublicPorts)
+	}
+	for _, svc := range summary.RiskyServices {
+		fmt.Fprintf(f, "  - ⚠ %s\n", svc)
+	}
+	if summary.DockerExposed > 0 {
+		fmt.Fprintf(f, "- Docker containers exposing risky services: %d\n", summary.DockerExposed)
+	}
+	if summary.StoragePressure != "" {
+		fmt.Fprintf(f, "- Storage: %s\n", Sanitize(summary.StoragePressure))
+	}
+	if summary.SystemState != "" {
+		fmt.Fprintf(f, "- Systemd: %s\n", Sanitize(summary.SystemState))
+	}
+	if summary.RebootRequired {
+		fmt.Fprintf(f, "- Security: reboot required\n")
+	}
+	if len(summary.TopRecommendations) > 0 {
+		fmt.Fprintln(f, "\n**Top Recommendations:**")
+		for i, rec := range summary.TopRecommendations {
+			fmt.Fprintf(f, "%d. **[%s]** %s\n", i+1, rec.Severity, Sanitize(rec.Title))
+			if rec.Action != "" {
+				fmt.Fprintf(f, "   → %s\n", Sanitize(rec.Action))
+			}
+		}
+	}
+	fmt.Fprintln(f)
+
 	for _, r := range results {
 		fmt.Fprintf(f, "## %s\n\n", Sanitize(r.Name))
 		fmt.Fprintf(f, "**Status:** %s\n\n", r.Status)
@@ -49,22 +82,20 @@ func WriteMD(osInfo model.OSInfo, results []model.Result) (string, error) {
 			for _, rec := range r.Recommendations {
 				title := Sanitize(rec.Title)
 				fmt.Fprintf(f, "#### %s\n\n", title)
-				fmt.Fprintf(f, "| Field | Value |\n")
-				fmt.Fprintf(f, "|-------|-------|\n")
-				fmt.Fprintf(f, "| Severity | %s |\n", rec.Severity)
+				fmt.Fprintf(f, "**Severity:** %s  \n", rec.Severity)
 				if rec.Context != "" {
-					fmt.Fprintf(f, "| Context | %s |\n", Sanitize(rec.Context))
+					fmt.Fprintf(f, "**Context:** %s  \n", Sanitize(rec.Context))
 				}
 				if rec.Impact != "" {
-					fmt.Fprintf(f, "| Impact | %s |\n", Sanitize(rec.Impact))
+					fmt.Fprintf(f, "**Impact:** %s  \n", Sanitize(rec.Impact))
 				}
 				if rec.Action != "" {
-					fmt.Fprintf(f, "| Action | %s |\n", Sanitize(rec.Action))
+					fmt.Fprintf(f, "**Action:** %s  \n", Sanitize(rec.Action))
 				}
 				if rec.Command != "" {
-					fmt.Fprintf(f, "| Command | `%s` |\n", Sanitize(rec.Command))
+					fmt.Fprintf(f, "**Command:** `%s`  \n", Sanitize(rec.Command))
 				}
-				fmt.Fprintf(f, "| Safe | %t |\n", rec.Safe)
+				fmt.Fprintf(f, "**Safe:** %t  \n", rec.Safe)
 				fmt.Fprintln(f)
 			}
 		}

@@ -35,12 +35,84 @@ func (m *FirewallModule) Diagnose(ctx context.Context) model.Result {
 		sections = append(sections, diagnoseNFTables(ctx))
 	}
 
+	// Determine which key risks are present
+	hasDockerUserEmpty := false
+	hasDockerUserMissing := false
+	hasUFWInactive := false
+	hasNoSSHRule := false
+	for _, sec := range sections {
+		for _, c := range sec.Checks {
+			switch {
+			case strings.Contains(c.Message, "DOCKER-USER chain exists but has no rules"):
+				hasDockerUserEmpty = true
+			case strings.Contains(c.Message, "DOCKER-USER chain not found"):
+				hasDockerUserMissing = true
+			case strings.Contains(c.Message, "UFW is inactive"):
+				hasUFWInactive = true
+			case strings.Contains(c.Message, "No UFW rule for SSH"):
+				hasNoSSHRule = true
+			}
+		}
+	}
+	// Build manual recs for found risks only
+	var recs []model.Recommendation
+	if hasDockerUserEmpty {
+		recs = append(recs, buildRecommendation(
+			"firewall.docker_empty_chain",
+			model.StatusWarning, "Docker-published ports not filtered by firewall",
+			"Docker publishes ports via iptables rules that bypass UFW and raw iptables INPUT policy. The DOCKER-USER chain exists but is empty.",
+			"Any container port published to 0.0.0.0 is accessible from any network interface with no firewall filtering",
+			"Add DOCKER-USER rules to restrict access to published ports, e.g., only allow specific source IPs",
+			"iptables -I DOCKER-USER -i eth0 -p tcp --dport 5432 -s 10.0.0.0/8 -j ACCEPT && iptables -I DOCKER-USER -i eth0 -j DROP",
+			false,
+		))
+	}
+	if hasDockerUserMissing {
+		recs = append(recs, buildRecommendation(
+			"firewall.docker_missing_chain",
+			model.StatusWarning, "DOCKER-USER chain missing",
+			"Docker-published ports bypass UFW and raw iptables INPUT policy entirely",
+			"Published container ports are accessible from any network without firewall restrictions",
+			"Create the DOCKER-USER chain or use Docker's built-in iptables management to restrict access",
+			"iptables -N DOCKER-USER && iptables -I DOCKER-USER -j RETURN",
+			false,
+		))
+	}
+	if hasUFWInactive {
+		recs = append(recs, buildRecommendation(
+			"firewall.ufw_inactive",
+			model.StatusWarning, "UFW firewall is inactive",
+			"Uncomplicated Firewall is installed but not enabled. No packet filtering is applied by UFW.",
+			"Server is unprotected by UFW; all ports are open to the network unless filtered by raw iptables rules",
+			"Ensure SSH is allowed before enabling UFW",
+			"ufw allow <ssh-port>/tcp && ufw --force enable",
+			false,
+		))
+	}
+	if hasNoSSHRule {
+		recs = append(recs, buildRecommendation(
+			"firewall.ufw_no_ssh",
+			model.StatusWarning, "SSH not allowed in UFW rules",
+			"UFW is active but no SSH rule found. Enabling UFW or reloading could lock out SSH.",
+			"Risk of SSH lockout if UFW is reloaded or after reboot",
+			"Add an SSH allow rule before any UFW reload or disable",
+			"ufw allow <ssh-port>/tcp",
+			true,
+		))
+	}
+	// Flat recs for uncovered warnings/criticals
+	skipPatterns := map[string][]string{
+		"Effective Stack": {"firewall.docker_empty_chain", "firewall.docker_missing_chain"},
+		"UFW":             {"firewall.ufw_inactive", "firewall.ufw_no_ssh"},
+	}
+	recs = append(recs, addFlatRecsFromSections(sections, skipPatterns)...)
+
 	return model.Result{
 		ID:              m.ID(),
 		Name:            m.Name(),
 		Status:          aggregateStatus(sections),
 		Sections:        sections,
-		Recommendations: collectRecommendations(sections),
+		Recommendations: recs,
 	}
 }
 
@@ -83,7 +155,7 @@ func diagnoseUFW(ctx context.Context) model.Section {
 
 	switch status {
 	case "active":
-		checks = append(checks, model.Check{	Status: model.StatusOK, Message: "UFW is active"})
+		checks = append(checks, model.Check{Status: model.StatusOK, Message: "UFW is active"})
 	case "inactive":
 		msg := "UFW is inactive"
 		if sshPort != "" {
@@ -91,24 +163,24 @@ func diagnoseUFW(ctx context.Context) model.Section {
 		} else {
 			msg += " — ensure SSH is allowed before: ufw enable"
 		}
-		checks = append(checks, model.Check{	Status: model.StatusWarning, Message: msg})
+		checks = append(checks, model.Check{Code: "firewall.ufw_inactive", Status: model.StatusWarning, Message: msg})
 	default:
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "UFW status: " + string(status)})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "UFW status: " + string(status)})
 	}
 
 	if defaultIn != "" {
 		if defaultIn == "deny" || defaultIn == "reject" {
-			checks = append(checks, model.Check{	Status: model.StatusOK, Message: "UFW default incoming: " + defaultIn})
+			checks = append(checks, model.Check{Status: model.StatusOK, Message: "UFW default incoming: " + defaultIn})
 		} else {
-			checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "UFW default incoming: " + defaultIn + " — ensure SSH is allowed before setting: ufw default deny incoming"})
+			checks = append(checks, model.Check{Status: model.StatusWarning, Message: "UFW default incoming: " + defaultIn + " — ensure SSH is allowed before setting: ufw default deny incoming"})
 		}
 	}
 	if defaultOut != "" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "UFW default outgoing: " + defaultOut})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "UFW default outgoing: " + defaultOut})
 	}
 
 	if logging != "" && logging != "on" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "UFW logging: " + logging + " — enable with: ufw logging on"})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "UFW logging: " + logging + " — enable with: ufw logging on"})
 	}
 
 	if status == "active" {
@@ -123,9 +195,9 @@ func diagnoseUFW(ctx context.Context) model.Section {
 				}
 			}
 		}
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: fmt.Sprintf("UFW rules: %d", ruleCount)})
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: fmt.Sprintf("UFW rules: %d", ruleCount)})
 		if !hasSSH {
-			checks = append(checks, model.Check{	Status: model.StatusWarning, Message: "No UFW rule for SSH — add: ufw allow " + sshPort})
+			checks = append(checks, model.Check{Code: "firewall.ufw_no_ssh", Status: model.StatusWarning, Message: "No UFW rule for SSH — add: ufw allow " + sshPort})
 		}
 	}
 
@@ -143,8 +215,8 @@ func diagnoseIPTables(ctx context.Context) model.Section {
 	hasIPv6 := hasBinary("ip6tables")
 
 	if !hasIPTables {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "iptables not installed"})
-		return model.Section{Name: "iptables", 	Status: model.StatusInfo, Checks: checks}
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "iptables not installed"})
+		return model.Section{Name: "iptables", Status: model.StatusInfo, Checks: checks}
 	}
 
 	chains := []string{"INPUT", "FORWARD", "OUTPUT"}
@@ -167,7 +239,7 @@ func diagnoseIPTables(ctx context.Context) model.Section {
 
 		rules := countRules(out)
 		if rules > 0 {
-			checks = append(checks, model.Check{	Status: model.StatusInfo, Message: fmt.Sprintf("iptables %s: %d rules", chain, rules)})
+			checks = append(checks, model.Check{Status: model.StatusInfo, Message: fmt.Sprintf("iptables %s: %d rules", chain, rules)})
 		}
 	}
 
@@ -180,7 +252,7 @@ func diagnoseIPTables(ctx context.Context) model.Section {
 			}
 		}
 		if v6Rules {
-			checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "ip6tables has IPv6 rules"})
+			checks = append(checks, model.Check{Status: model.StatusInfo, Message: "ip6tables has IPv6 rules"})
 		}
 	}
 
@@ -196,8 +268,8 @@ func diagnoseNFTables(ctx context.Context) model.Section {
 
 	out, _ := runCmd(ctx, "nft", "list", "ruleset")
 	if out == "" {
-		checks = append(checks, model.Check{	Status: model.StatusInfo, Message: "nftables: no ruleset found"})
-		return model.Section{Name: "nftables", 	Status: model.StatusInfo, Checks: checks}
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "nftables: no ruleset found"})
+		return model.Section{Name: "nftables", Status: model.StatusInfo, Checks: checks}
 	}
 
 	tableCount := 0
@@ -220,7 +292,7 @@ func diagnoseNFTables(ctx context.Context) model.Section {
 		}
 	}
 
-	checks = append(checks, model.Check{	Status: model.StatusOK, Message: fmt.Sprintf("nftables: %d tables, %d chains, %d rules", tableCount, chainCount, ruleCount)})
+	checks = append(checks, model.Check{Status: model.StatusOK, Message: fmt.Sprintf("nftables: %d tables, %d chains, %d rules", tableCount, chainCount, ruleCount)})
 
 	return model.Section{
 		Name:   "nftables",
@@ -270,7 +342,14 @@ func diagnoseEffectiveStack(ctx context.Context) model.Section {
 	var active []string
 	if ufwPresent {
 		out, _ := runCmd(ctx, "ufw", "status")
-		if strings.Contains(out, "active") {
+		isActive := false
+		for _, line := range strings.Split(out, "\n") {
+			if strings.TrimSpace(line) == "Status: active" {
+				isActive = true
+				break
+			}
+		}
+		if isActive {
 			active = append(active, "UFW")
 		} else {
 			active = append(active, "UFW (inactive)")
@@ -300,12 +379,14 @@ func diagnoseEffectiveStack(ctx context.Context) model.Section {
 				})
 			} else {
 				checks = append(checks, model.Check{
+					Code:    "firewall.docker_empty_chain",
 					Status:  model.StatusWarning,
 					Message: "DOCKER-USER chain exists but has no rules — Docker-published ports bypass UFW and raw iptables INPUT policy",
 				})
 			}
 		} else {
 			checks = append(checks, model.Check{
+				Code:    "firewall.docker_missing_chain",
 				Status:  model.StatusWarning,
 				Message: "DOCKER-USER chain not found — Docker-published ports bypass UFW and raw iptables INPUT policy",
 			})

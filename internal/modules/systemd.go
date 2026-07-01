@@ -30,7 +30,7 @@ func (m *SystemdModule) Diagnose(ctx context.Context) model.Result {
 		Name:            m.Name(),
 		Status:          aggregateStatus(sections),
 		Sections:        sections,
-		Recommendations: collectRecommendations(sections),
+		Recommendations: addFlatRecsFromSections(sections, nil),
 	}
 }
 
@@ -67,7 +67,7 @@ func diagnoseSystemdFailed(ctx context.Context) model.Section {
 	// Check overall system state
 	stateOut, _ := runCmd(ctx, "systemctl", "is-system-running")
 	if stateOut == "degraded" {
-		checks = append(checks, model.Check{Status: model.StatusWarning, Message: "System state: degraded (some units failed or offline)"})
+		checks = append(checks, model.Check{Code: "systemd.degraded", Status: model.StatusWarning, Message: "System state: degraded (some units failed or offline)"})
 	} else if stateOut != "" {
 		checks = append(checks, model.Check{Status: model.StatusOK, Message: fmt.Sprintf("System state: %s", stateOut)})
 	}
@@ -82,23 +82,43 @@ func diagnoseSystemdFailed(ctx context.Context) model.Section {
 func diagnoseSystemdInactive(ctx context.Context) model.Section {
 	var checks []model.Check
 
-	out, err := runCmd(ctx, "systemctl", "list-units", "--all", "--state=inactive", "--no-legend", "--no-pager")
+	// Get all enabled units from unit files (accurate enable state)
+	enabledOut, err := runCmd(ctx, "systemctl", "list-unit-files", "--state=enabled", "--no-legend", "--no-pager")
+	if err != nil {
+		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "systemctl: unable to list enabled units"})
+		return model.Section{Name: "Inactive Units", Status: model.StatusInfo, Checks: checks}
+	}
+
+	enabledUnits := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(enabledOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 1 {
+			enabledUnits[fields[0]] = true
+		}
+	}
+
+	// Get inactive units
+	inactiveOut, err := runCmd(ctx, "systemctl", "list-units", "--all", "--state=inactive", "--no-legend", "--no-pager")
 	if err != nil {
 		checks = append(checks, model.Check{Status: model.StatusInfo, Message: "systemctl: unable to list inactive units"})
 		return model.Section{Name: "Inactive Units", Status: model.StatusInfo, Checks: checks}
 	}
 
-	lines := strings.Split(strings.TrimSpace(out), "\n")
+	inactiveLines := strings.Split(strings.TrimSpace(inactiveOut), "\n")
 	totalInactive := 0
 	enabledInactive := 0
-	for _, line := range lines {
+	for _, line := range inactiveLines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		totalInactive++
 		fields := strings.Fields(line)
-		if len(fields) >= 4 && fields[3] == "enabled" && fields[1] == "inactive" {
+		if len(fields) >= 1 && enabledUnits[fields[0]] {
 			enabledInactive++
 			checks = append(checks, model.Check{
 				Status:  model.StatusWarning,

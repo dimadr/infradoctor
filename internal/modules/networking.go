@@ -25,20 +25,76 @@ func (m *NetworkingModule) Diagnose(ctx context.Context) model.Result {
 	sections = append(sections, diagnoseRouting(ctx))
 	sections = append(sections, diagnoseDNS(ctx))
 
+	// Manual recommendations for risky public services
+	var recs []model.Recommendation
+	var riskyServices []struct {
+		svc  string
+		port string
+		addr string
+	}
+	for _, sec := range sections {
+		if sec.Name == "Listening Ports" {
+			for _, c := range sec.Checks {
+				if strings.Contains(c.Message, "risky service") {
+					msg := c.Message
+					var svc, port, addr string
+					if _, after, ok := strings.Cut(msg, " — risky service ("); ok {
+						if end := strings.LastIndex(after, ")"); end > 0 {
+							svc = after[:end]
+						}
+					}
+					fields := strings.Fields(msg)
+					for i, f := range fields {
+						if f == "port" && i+1 < len(fields) {
+							port = fields[i+1]
+						}
+						if f == "on" && i+1 < len(fields) && addr == "" {
+							addr = fields[i+1]
+						}
+					}
+					if svc != "" {
+						riskyServices = append(riskyServices, struct {
+							svc  string
+							port string
+							addr string
+						}{svc, port, addr})
+					}
+				}
+			}
+		}
+	}
+	for _, rs := range riskyServices {
+		recs = append(recs, buildRecommendation(
+			"networking.risky_service",
+			model.StatusWarning,
+			fmt.Sprintf("%s exposed on all interfaces (port %s)", rs.svc, rs.port),
+			fmt.Sprintf("%s is listening on %s port %s, accessible from any network interface", rs.svc, rs.addr, rs.port),
+			fmt.Sprintf("Unauthorized access to %s if not properly authenticated", rs.svc),
+			fmt.Sprintf("Bind %s to localhost only, or restrict with firewall rules", rs.svc),
+			fmt.Sprintf("ss -tulpn | grep ':%s '", rs.port),
+			false,
+		))
+	}
+	// Flat recs for uncovered warnings (e.g., no DNS servers)
+	skipPatterns := map[string][]string{
+		"Listening Ports": {"networking.risky_service"},
+	}
+	recs = append(recs, addFlatRecsFromSections(sections, skipPatterns)...)
+
 	return model.Result{
 		ID:              m.ID(),
 		Name:            m.Name(),
 		Status:          aggregateStatus(sections),
 		Sections:        sections,
-		Recommendations: collectRecommendations(sections),
+		Recommendations: recs,
 	}
 }
 
 var riskyPorts = map[int]string{
-	5432: "PostgreSQL",
-	5434: "PostgreSQL (alt)",
-	6379: "Redis",
-	6380: "Redis (SSL)",
+	5432:  "PostgreSQL",
+	5434:  "PostgreSQL (alt)",
+	6379:  "Redis",
+	6380:  "Redis (SSL)",
 	27017: "MongoDB",
 	3306:  "MySQL/MariaDB",
 	9200:  "Elasticsearch",
@@ -129,6 +185,7 @@ func diagnoseListeningPorts(ctx context.Context) model.Section {
 	}
 
 	checks = append(checks, model.Check{
+		Code:    "networking.port_count",
 		Status:  model.StatusInfo,
 		Message: fmt.Sprintf("Total listening ports: %d (%d public, %d local-only)", len(entries), publicPorts, localPorts),
 	})
@@ -140,14 +197,16 @@ func diagnoseListeningPorts(ctx context.Context) model.Section {
 		if e.process != "" {
 			msg += fmt.Sprintf(" [%s]", e.process)
 		}
+		code := ""
 		if isRisky && e.isPublic {
 			status = model.StatusWarning
+			code = "networking.risky_service"
 			msg += fmt.Sprintf(" — risky service (%s) exposed on all interfaces", svc)
 		} else if isRisky {
 			status = model.StatusInfo
 			msg += fmt.Sprintf(" (%s, local only)", svc)
 		}
-		checks = append(checks, model.Check{Status: status, Message: msg})
+		checks = append(checks, model.Check{Code: code, Status: status, Message: msg})
 	}
 
 	ipv6Only := 0
