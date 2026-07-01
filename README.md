@@ -49,6 +49,8 @@
 
 - `report.md` — читаемый Markdown с статусами и рекомендациями
 - `report.json` — машиночитаемый JSON для обработки
+- `exposure_summary` — сводка экспозиции в обоих форматах
+- Каждый чек и рекомендация имеют `code` для стабильного маппинга
 - Каждый модуль содержит секции (Configuration, Service, Security)
 - Рекомендации: "PermitRootLogin should be 'no'"
 
@@ -58,27 +60,32 @@
 infradoctor/
 ├── cmd/infradoctor/main.go
 ├── internal/
-│   ├── core/          # workflow
-│   ├── detect/        # обнаружение
-│   ├── ui/            # меню
-│   ├── report/        # отчеты + sanitize
-│   └── modules/       # диагностические модули
+│   ├── core/
+│   ├── detect/
+│   ├── ui/
+│   ├── report/
+│   │   ├── json.go
+│   │   ├── markdown.go
+│   │   ├── summary.go          # Exposure Summary
+│   │   ├── sanitize.go
+│   │   └── sanitize_test.go
+│   └── modules/
 │       ├── interface.go
 │       ├── registry.go
-│       ├── ssh.go                # ✅ v0.2
-│       ├── firewall.go           # ✅ v0.3
-│       ├── networking.go         # ✅ v0.4
-│       ├── docker.go             # ✅ v0.5
-│       ├── storage.go            # ✅ v0.6
-│       ├── systemd.go            # ✅ v0.7
-│       ├── security.go           # ✅ v0.8
-│       ├── nginx.go              # added
 │       ├── helpers.go
-│       └── registry.go
+│       ├── ssh.go
+│       ├── firewall.go
+│       ├── networking.go
+│       ├── docker.go
+│       ├── storage.go
+│       ├── systemd.go
+│       ├── security.go
+│       └── nginx.go
 ├── testdata/
 ├── reports/examples/
 ├── go.mod
 ├── README.md
+├── TODO.md
 └── LICENSE
 ```
 
@@ -86,13 +93,15 @@ infradoctor/
 
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
 - [x] v0.2 — SSH Module
-- [x] v0.3 — Firewall Module
-- [x] v0.4 — Networking Module
-- [x] v0.5 — Docker Module
-- [x] v0.6 — Storage Module
-- [x] v0.7 — Systemd Module
-- [x] v0.8 — Security Baseline Module
-- [x] Nginx Module
+- [x] v0.3 — Firewall Module (effective stack, DOCKER-USER)
+- [x] v0.4 — Networking Module (listening ports, routing, DNS)
+- [x] v0.5 — Docker Module (containers, networks, storage)
+- [x] v0.6 — Storage Module (df, inodes, disk analysis)
+- [x] v0.7 — Systemd Module (failed units, timers, sockets)
+- [x] v0.8 — Security Baseline Module (sudo, updates, fail2ban, kernel)
+- [x] Nginx Module (host + container)
+- [x] Exposure Summary (Markdown + JSON)
+- [x] Code-based check/recommendation matching
 
 
 
@@ -135,6 +144,8 @@ Read-only. No config changes. No service restarts. No package installs.
 
 - `report.md` — human-readable with statuses and recommendations
 - `report.json` — machine-readable for automation
+- `exposure_summary` section in both formats
+- Each check and recommendation has a stable `code` field
 - Each module has sections (Configuration, Service, Security, ...)
 - Recommendations: "PermitRootLogin should be 'no'"
 
@@ -148,23 +159,28 @@ infradoctor/
 │   ├── detect/
 │   ├── ui/
 │   ├── report/
+│   │   ├── json.go
+│   │   ├── markdown.go
+│   │   ├── summary.go
+│   │   ├── sanitize.go
+│   │   └── sanitize_test.go
 │   └── modules/
 │       ├── interface.go
 │       ├── registry.go
-│       ├── ssh.go                # ✅ v0.2
-│       ├── firewall.go           # ✅ v0.3
-│       ├── networking.go         # ✅ v0.4
-│       ├── docker.go             # ✅ v0.5
-│       ├── storage.go            # ✅ v0.6
-│       ├── systemd.go            # ✅ v0.7
-│       ├── security.go           # ✅ v0.8
-│       ├── nginx.go              # added
 │       ├── helpers.go
-│       └── registry.go
+│       ├── ssh.go
+│       ├── firewall.go
+│       ├── networking.go
+│       ├── docker.go
+│       ├── storage.go
+│       ├── systemd.go
+│       ├── security.go
+│       └── nginx.go
 ├── testdata/
 ├── reports/examples/
 ├── go.mod
 ├── README.md
+├── TODO.md
 └── LICENSE
 ```
 
@@ -172,13 +188,15 @@ infradoctor/
 
 - [x] v0.1 — CLI, root, OS, menu, reports, sanitize
 - [x] v0.2 — SSH Module
-- [x] v0.3 — Firewall Module
-- [x] v0.4 — Networking Module
-- [x] v0.5 — Docker Module
-- [x] v0.6 — Storage Module
-- [x] v0.7 — Systemd Module
-- [x] v0.8 — Security Baseline Module
-- [x] Nginx Module
+- [x] v0.3 — Firewall Module (effective stack, DOCKER-USER)
+- [x] v0.4 — Networking Module (listening ports, routing, DNS)
+- [x] v0.5 — Docker Module (containers, networks, storage)
+- [x] v0.6 — Storage Module (df, inodes, disk analysis)
+- [x] v0.7 — Systemd Module (failed units, timers, sockets)
+- [x] v0.8 — Security Baseline Module (sudo, updates, fail2ban, kernel)
+- [x] Nginx Module (host + container)
+- [x] Exposure Summary (Markdown + JSON)
+- [x] Code-based check/recommendation matching
 
 ---
 
